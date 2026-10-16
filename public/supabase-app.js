@@ -260,18 +260,18 @@ async function submitPostComment(postId, body) {
   const trimmed = body.trim();
   if (!trimmed) {
     showSuccessToast('Write something before posting your comment.');
-    return;
+    return false;
   }
 
   if (trimmed.length > maximumCommentLength) {
     showSuccessToast(`Keep comments under ${maximumCommentLength} characters.`);
-    return;
+    return false;
   }
 
   if (!currentUser) {
     openAuthDialog();
     authFeedback.textContent = 'Sign in to comment on posts.';
-    return;
+    return false;
   }
 
   try {
@@ -286,9 +286,11 @@ async function submitPostComment(postId, body) {
     });
     if (error) throw error;
     await refreshPostComments(postId);
+    return true;
   } catch (error) {
     console.error('Unable to post an InstaLite comment:', error);
     showSuccessToast('Could not post your comment. Please try again.');
+    return false;
   }
 }
 
@@ -518,8 +520,10 @@ function createPostCard(post) {
 
   commentForm.addEventListener('submit', async (event) => {
     event.preventDefault();
-    await submitPostComment(post.id, commentInput.value);
-    commentInput.value = '';
+    const posted = await submitPostComment(post.id, commentInput.value);
+    if (posted) {
+      commentInput.value = '';
+    }
   });
   commentForm.append(commentInput, commentSubmit);
 
@@ -690,16 +694,18 @@ async function refreshVisiblePostLikes() {
   const postIds = cards.map((card) => card.dataset.postId);
 
   try {
-    const { data: likeRows, error: likesError } = await supabase
-      .from('post_likes')
-      .select('post_id')
-      .in('post_id', postIds);
-    if (likesError) throw likesError;
-
-    const counts = new Map();
-    for (const row of likeRows ?? []) {
-      counts.set(row.post_id, (counts.get(row.post_id) ?? 0) + 1);
-    }
+    // Load exact per-post counts (one count query per visible post) so
+    // counts stay correct even when a post has more likes than a single
+    // row-limited query would return.
+    const countResults = await Promise.all(postIds.map(async (postId) => {
+      const { count, error: countError } = await supabase
+        .from('post_likes')
+        .select('post_id', { count: 'exact', head: true })
+        .eq('post_id', postId);
+      if (countError) throw countError;
+      return [postId, count ?? 0];
+    }));
+    const counts = new Map(countResults);
 
     let likedIds = new Set();
     if (currentUser) {
@@ -981,6 +987,12 @@ function initializeStoryViewer() {
 
   document.querySelector('#close-story-viewer')?.addEventListener('click', () => {
     document.querySelector('#story-viewer').close();
+  });
+  document.querySelector('#story-viewer')?.addEventListener('click', (event) => {
+    // Close only when the backdrop itself is clicked, not the dialog content.
+    if (event.target === event.currentTarget) {
+      event.currentTarget.close();
+    }
   });
   document.querySelector('#story-viewer-prev')?.addEventListener('click', () => stepStoryViewer(-1));
   document.querySelector('#story-viewer-next')?.addEventListener('click', () => stepStoryViewer(1));

@@ -119,9 +119,20 @@ test('Supabase schema derives comment author names server-side', async () => {
   assert.match(schema, /create or replace function public\.set_post_comment_username\(\)/);
   assert.match(schema, /security definer/);
   assert.match(schema, /auth\.jwt\(\)/);
+  assert.match(schema, /app_metadata/);
+  assert.doesNotMatch(schema, /jwt_claims -> 'user_metadata'/);
   assert.match(schema, /NEW\.username := derived_name/);
   assert.match(schema, /create trigger set_post_comment_username/);
   assert.match(schema, /before insert on public\.post_comments/);
+});
+
+test('Supabase schema keeps saved posts out of the realtime publication', async () => {
+  const schema = await fs.readFile(path.join(__dirname, '..', 'supabase', 'schema.sql'), 'utf8');
+
+  assert.match(schema, /alter publication supabase_realtime drop table public\.saved_posts/);
+  assert.doesNotMatch(schema, /alter publication supabase_realtime add table public\.saved_posts/);
+  assert.doesNotMatch(schema, /alter table public\.saved_posts replica identity full/);
+  assert.match(schema, /alter publication supabase_realtime add table public\.post_comments/);
 });
 
 test('Frontend wires comment reading and posting to the post_comments table', async () => {
@@ -150,7 +161,6 @@ test('Supabase schema keeps saved posts private to their owner', async () => {
   assert.match(schema, /"Users can save posts" on public\.saved_posts for insert/);
   assert.match(schema, /"Users can unsave their own posts" on public\.saved_posts for delete/);
   assert.doesNotMatch(schema, /publicly readable" on public\.saved_posts/);
-  assert.match(schema, /alter publication supabase_realtime add table public\.saved_posts/);
 });
 
 test('Frontend wires save and unsave actions with a private saved view', async () => {
@@ -162,6 +172,27 @@ test('Frontend wires save and unsave actions with a private saved view', async (
   assert.match(appScript, /setSavedOnlyView/);
   assert.match(appScript, /Sign in to save posts/);
   assert.match(page, /id="saved-posts-link"/);
+});
+
+test('Frontend loads exact per-post like counts', async () => {
+  const appScript = await fs.readFile(path.join(__dirname, '..', 'public', 'supabase-app.js'), 'utf8');
+  const bulkLoader = appScript.slice(
+    appScript.indexOf('async function refreshVisiblePostLikes'),
+    appScript.indexOf('let likedIds = new Set();'),
+  );
+
+  assert.match(bulkLoader, /count: 'exact', head: true/);
+  assert.match(bulkLoader, /\.eq\('post_id', postId\)/);
+  assert.doesNotMatch(bulkLoader, /\.in\('post_id', postIds\)/);
+});
+
+test('Frontend keeps failed comments in the input and closes the viewer on backdrop clicks', async () => {
+  const appScript = await fs.readFile(path.join(__dirname, '..', 'public', 'supabase-app.js'), 'utf8');
+
+  assert.match(appScript, /const posted = await submitPostComment\(post\.id, commentInput\.value\)/);
+  assert.match(appScript, /if \(posted\) \{\s+commentInput\.value = '';/);
+  assert.match(appScript, /return true;/);
+  assert.match(appScript, /event\.target === event\.currentTarget/);
 });
 
 test('Story circles open a viewer with navigation and close controls', async () => {

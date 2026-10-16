@@ -48,8 +48,9 @@ create policy "Likes cannot be updated" on public.post_likes for update using (f
 -- Comments: signed-in users can comment; text is validated for length
 -- both in the app and here so direct API calls cannot bypass it.
 -- The displayed author name is derived server-side from the caller's
--- auth JWT (display_name metadata, else the email local part), so a
--- client can never impersonate another user via a chosen username.
+-- auth JWT (server-controlled app_metadata display name, else the email
+-- local part), so a client can never impersonate another user via a
+-- chosen username.
 create table if not exists public.post_comments (
   id uuid primary key default gen_random_uuid(),
   post_id uuid not null references public.posts(id) on delete cascade,
@@ -74,7 +75,7 @@ begin
   end if;
 
   derived_name := nullif(trim(both from coalesce(
-    jwt_claims -> 'user_metadata' ->> 'display_name',
+    jwt_claims -> 'app_metadata' ->> 'display_name',
     jwt_claims ->> 'email',
     ''
   )), '');
@@ -158,7 +159,6 @@ create policy "Users can delete their own post images" on storage.objects
 alter table public.posts replica identity full;
 alter table public.post_likes replica identity full;
 alter table public.post_comments replica identity full;
-alter table public.saved_posts replica identity full;
 
 do $$
 begin
@@ -189,14 +189,16 @@ begin
   ) then
     alter publication supabase_realtime add table public.post_comments;
   end if;
-  if not exists (
+  -- saved_posts rows are strictly owner-scoped; keep the table out of the
+  -- realtime publication and remove it for setups that already added it.
+  if exists (
     select 1
     from pg_publication_tables
     where pubname = 'supabase_realtime'
       and schemaname = 'public'
       and tablename = 'saved_posts'
   ) then
-    alter publication supabase_realtime add table public.saved_posts;
+    alter publication supabase_realtime drop table public.saved_posts;
   end if;
 end
 $$;
