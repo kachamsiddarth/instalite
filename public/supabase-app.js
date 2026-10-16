@@ -290,6 +290,99 @@ async function submitPostComment(postId, body) {
   }
 }
 
+const postSavedState = new Map();
+let savedOnlyView = false;
+let unsubscribeSaved;
+
+function setSaveButtonState(saveButton, saved) {
+  saveButton.classList.toggle('post-action--saved', saved);
+  saveButton.dataset.saved = saved ? 'true' : 'false';
+  saveButton.setAttribute('aria-pressed', String(saved));
+  saveButton.setAttribute('aria-label', saved ? 'Unsave this post' : 'Save this post');
+}
+
+function syncPostCardSaved(card, saved) {
+  const saveButton = card.querySelector('[data-save-button]');
+  if (!saveButton) return;
+  const canInteract = Boolean(currentUser);
+  saveButton.disabled = !canInteract;
+  setSaveButtonState(saveButton, saved);
+  saveButton.title = canInteract ? '' : 'Sign in to save posts';
+}
+
+function rememberPostSaved(postId, saved) {
+  postSavedState.set(postId, saved);
+
+  const card = feedPosts.querySelector(`[data-post-id="${CSS.escape(postId)}"]`);
+  if (card) {
+    syncPostCardSaved(card, saved);
+  }
+
+  if (savedOnlyView && !saved) {
+    card?.remove();
+    if (!feedPosts.querySelector('[data-post-id]')) {
+      showFeedMessage('No saved posts yet. Tap the bookmark on a post to keep it here.', 'empty');
+    }
+  }
+}
+
+async function refreshPostSaved(postId) {
+  if (!currentUser) {
+    rememberPostSaved(postId, false);
+    return;
+  }
+
+  try {
+    const { data, error } = await supabase
+      .from('saved_posts')
+      .select('post_id')
+      .eq('post_id', postId)
+      .eq('user_id', currentUser.id)
+      .maybeSingle();
+    if (error) throw error;
+    rememberPostSaved(postId, Boolean(data));
+  } catch (error) {
+    console.error('Unable to load the saved state for an InstaLite post:', error);
+  }
+}
+
+async function togglePostSaved(postId) {
+  if (!currentUser) {
+    openAuthDialog();
+    authFeedback.textContent = 'Sign in to save posts.';
+    return;
+  }
+
+  const card = feedPosts.querySelector(`[data-post-id="${CSS.escape(postId)}"]`);
+  const saveButton = card?.querySelector('[data-save-button]');
+  const saved = postSavedState.get(postId) ?? false;
+  if (saveButton) saveButton.disabled = true;
+
+  try {
+    if (saved) {
+      const { error } = await supabase
+        .from('saved_posts')
+        .delete()
+        .eq('post_id', postId)
+        .eq('user_id', currentUser.id);
+      if (error) throw error;
+      rememberPostSaved(postId, false);
+    } else {
+      const { error } = await supabase
+        .from('saved_posts')
+        .insert({ post_id: postId, user_id: currentUser.id });
+      if (error) throw error;
+      rememberPostSaved(postId, true);
+    }
+  } catch (error) {
+    console.error('Unable to update the saved state for an InstaLite post:', error);
+    showSuccessToast('Could not update your saved posts. Please try again.');
+    await refreshPostSaved(postId);
+  } finally {
+    if (saveButton) saveButton.disabled = false;
+  }
+}
+
 function createPostCard(post) {
   const card = document.createElement('article');
   card.className = 'post-card';
@@ -348,16 +441,20 @@ function createPostCard(post) {
   const commentButton = document.createElement('button');
   commentButton.className = 'post-action';
   commentButton.type = 'button';
-  commentButton.disabled = true;
-  commentButton.setAttribute('aria-label', 'Comments (coming soon)');
+  commentButton.setAttribute('aria-label', `Comment on ${post.username}'s post`);
   commentButton.append(createIcon('M21 11.5a8.4 8.4 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.4 8.4 0 0 1-3.8-.9L3 21l1.9-5.7a8.4 8.4 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.4 8.4 0 0 1 3.8-.9h.5a8.5 8.5 0 0 1 8 8v.5Z'));
+  commentButton.addEventListener('click', () => {
+    card.querySelector('.post-card__comment-input')?.focus();
+  });
 
   const bookmarkButton = document.createElement('button');
   bookmarkButton.className = 'post-action post-action--save';
   bookmarkButton.type = 'button';
   bookmarkButton.disabled = true;
-  bookmarkButton.setAttribute('aria-label', 'Save post (coming soon)');
+  bookmarkButton.dataset.saveButton = 'true';
+  bookmarkButton.setAttribute('aria-label', 'Save this post');
   bookmarkButton.append(createIcon('M6 4.8A1.8 1.8 0 0 1 7.8 3h8.4A1.8 1.8 0 0 1 18 4.8V21l-6-4-6 4V4.8Z'));
+  bookmarkButton.addEventListener('click', () => togglePostSaved(post.id));
 
   actions.append(likeButton, commentButton, bookmarkButton);
 
@@ -474,18 +571,40 @@ function listenForPosts() {
   unsubscribePosts?.();
   unsubscribeLikes?.();
   unsubscribeComments?.();
+  unsubscribeSaved?.();
   showFeedMessage('Finding your little moments…', 'loading');
 
-  supabase.from('posts').select('*').order('created_at', { ascending: false }).limit(30).then(({ data, error }) => {
-    if (error) throw error;
-    if (!data?.length) {
-      showFeedMessage('Your feed is taking a little breath. Check back soon.', 'empty');
+  const loadPosts = savedOnlyView && currentUser
+    ? supabase
+      .from('saved_posts')
+      .select('post_id, created_at, posts(*)')
+      .eq('user_id', currentUser.id)
+      .order('created_at', { ascending: false })
+      .limit(30)
+      .then(({ data, error }) => {
+        if (error) throw error;
+        return (data ?? []).map((row) => row.posts).filter(Boolean);
+      })
+    : supabase.from('posts').select('*').order('created_at', { ascending: false }).limit(30).then(({ data, error }) => {
+      if (error) throw error;
+      return data ?? [];
+    });
+
+  loadPosts.then((rows) => {
+    if (!rows.length) {
+      showFeedMessage(
+        savedOnlyView
+          ? 'No saved posts yet. Tap the bookmark on a post to keep it here.'
+          : 'Your feed is taking a little breath. Check back soon.',
+        'empty',
+      );
       return;
     }
-    const posts = data.map((post) => ({ ...post, timestamp: post.created_at, userId: post.user_id }));
+    const posts = rows.map((post) => ({ ...post, timestamp: post.created_at, userId: post.user_id }));
     feedPosts.replaceChildren(...posts.map(createPostCard));
     refreshVisiblePostLikes();
     refreshVisiblePostComments();
+    refreshVisiblePostSaved();
   }).catch((error) => {
     console.error('Unable to subscribe to the InstaLite feed:', error);
     showFeedMessage('Your feed could not load. Check Supabase setup and try again.', 'error', true);
@@ -499,6 +618,41 @@ function listenForPosts() {
     const postId = payload.new?.post_id ?? payload.old?.post_id;
     if (postId) refreshPostComments(postId);
   }).subscribe();
+  unsubscribeSaved = supabase.channel('posts-saved').on('postgres_changes', { event: '*', schema: 'public', table: 'saved_posts' }, (payload) => {
+    if (payload.new && payload.old) return;
+    const postId = payload.new?.post_id ?? payload.old?.post_id;
+    if (postId) refreshPostSaved(postId);
+  }).subscribe();
+}
+
+async function refreshVisiblePostSaved() {
+  const cards = [...feedPosts.querySelectorAll('[data-post-id]')];
+  if (!cards.length) return;
+
+  if (!currentUser) {
+    for (const card of cards) {
+      syncPostCardSaved(card, false);
+      postSavedState.set(card.dataset.postId, false);
+    }
+    return;
+  }
+
+  const postIds = cards.map((card) => card.dataset.postId);
+
+  try {
+    const { data, error } = await supabase
+      .from('saved_posts')
+      .select('post_id')
+      .in('post_id', postIds)
+      .eq('user_id', currentUser.id);
+    if (error) throw error;
+    const savedIds = new Set((data ?? []).map((row) => row.post_id));
+    for (const postId of postIds) {
+      rememberPostSaved(postId, savedIds.has(postId));
+    }
+  } catch (error) {
+    console.error('Unable to load saved posts for the InstaLite feed:', error);
+  }
 }
 
 async function refreshVisiblePostComments() {
@@ -723,9 +877,44 @@ function updateSignedInProfile(user) {
   profileUsername.textContent = username;
   profileSubtitle.textContent = user?.email || 'Sign in to share a moment';
   document.querySelector('#open-auth-mobile').setAttribute('aria-label', signedIn ? 'Sign out' : 'Sign in');
+
+  if (!signedIn && savedOnlyView) {
+    setSavedOnlyView(false);
+    return;
+  }
+
   if (feedPosts.querySelector('[data-post-id]')) {
     refreshVisiblePostLikes();
+    refreshVisiblePostSaved();
   }
+  syncSavedLink();
+}
+
+function syncSavedLink() {
+  const savedLink = document.querySelector('#saved-posts-link');
+  if (!savedLink) return;
+  savedLink.setAttribute('aria-pressed', String(savedOnlyView));
+  savedLink.classList.toggle('navigation__link--active', savedOnlyView);
+  savedLink.querySelector('span').textContent = savedOnlyView ? 'Saved ✓' : 'Saved';
+}
+
+function setSavedOnlyView(enabled) {
+  if (enabled && !currentUser) {
+    openAuthDialog();
+    authFeedback.textContent = 'Sign in to view your saved posts.';
+    return;
+  }
+
+  savedOnlyView = enabled;
+  syncSavedLink();
+  listenForPosts();
+}
+
+function initializeSavedView() {
+  syncSavedLink();
+  document.querySelector('#saved-posts-link')?.addEventListener('click', () => {
+    setSavedOnlyView(!savedOnlyView);
+  });
 }
 
 function getAuthErrorMessage(error, mode) {
@@ -758,6 +947,7 @@ if (todayDate) {
 }
 
 initializeTheme();
+initializeSavedView();
 
 if (!configIsReady && !useEmulators) {
   showFeedMessage('Supabase is not configured. Copy .env.example to .env and add your project values.', 'error');

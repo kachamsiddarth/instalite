@@ -122,3 +122,26 @@ test('Frontend wires comment reading and posting to the post_comments table', as
   assert.match(appScript, /post-card__comment-form/);
   assert.match(appScript, /Sign in to comment on posts/);
 });
+
+test('Supabase schema keeps saved posts private to their owner', async () => {
+  const schema = await fs.readFile(path.join(__dirname, '..', 'supabase', 'schema.sql'), 'utf8');
+
+  assert.match(schema, /create table if not exists public\.saved_posts/);
+  assert.match(schema, /primary key \(post_id, user_id\)/);
+  assert.match(schema, /"Users can read their own saved posts" on public\.saved_posts for select/);
+  assert.match(schema, /"Users can save posts" on public\.saved_posts for insert/);
+  assert.match(schema, /"Users can unsave their own posts" on public\.saved_posts for delete/);
+  assert.doesNotMatch(schema, /publicly readable" on public\.saved_posts/);
+  assert.match(schema, /alter publication supabase_realtime add table public\.saved_posts/);
+});
+
+test('Frontend wires save and unsave actions with a private saved view', async () => {
+  const appScript = await fs.readFile(path.join(__dirname, '..', 'public', 'supabase-app.js'), 'utf8');
+  const page = await fs.readFile(path.join(__dirname, '..', 'public', 'index.html'), 'utf8');
+
+  assert.match(appScript, /from\('saved_posts'\)/);
+  assert.match(appScript, /togglePostSaved\(post\.id\)/);
+  assert.match(appScript, /setSavedOnlyView/);
+  assert.match(appScript, /Sign in to save posts/);
+  assert.match(page, /id="saved-posts-link"/);
+});

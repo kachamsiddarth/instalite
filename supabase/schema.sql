@@ -70,6 +70,30 @@ create policy "Users can delete their own comments" on public.post_comments for 
 drop policy if exists "Comments cannot be updated" on public.post_comments;
 create policy "Comments cannot be updated" on public.post_comments for update using (false);
 
+-- Saved posts: private per-user bookmarks. No public read policy exists,
+-- so a user can only ever see their own saved-post rows.
+create table if not exists public.saved_posts (
+  post_id uuid not null references public.posts(id) on delete cascade,
+  user_id uuid not null references auth.users(id) on delete cascade,
+  created_at timestamptz not null default now(),
+  primary key (post_id, user_id)
+);
+
+create index if not exists saved_posts_user_id_idx on public.saved_posts (user_id, created_at desc);
+alter table public.saved_posts enable row level security;
+
+drop policy if exists "Users can read their own saved posts" on public.saved_posts;
+create policy "Users can read their own saved posts" on public.saved_posts for select
+  using ((select auth.uid()) = user_id);
+drop policy if exists "Users can save posts" on public.saved_posts;
+create policy "Users can save posts" on public.saved_posts for insert
+  with check ((select auth.uid()) = user_id);
+drop policy if exists "Users can unsave their own posts" on public.saved_posts;
+create policy "Users can unsave their own posts" on public.saved_posts for delete
+  using ((select auth.uid()) = user_id);
+drop policy if exists "Saved posts cannot be updated" on public.saved_posts;
+create policy "Saved posts cannot be updated" on public.saved_posts for update using (false);
+
 insert into storage.buckets (id, name, public)
 values ('post-images', 'post-images', true)
 on conflict (id) do update set public = true;
@@ -91,6 +115,7 @@ create policy "Users can delete their own post images" on storage.objects
 alter table public.posts replica identity full;
 alter table public.post_likes replica identity full;
 alter table public.post_comments replica identity full;
+alter table public.saved_posts replica identity full;
 
 do $$
 begin
@@ -120,6 +145,15 @@ begin
       and tablename = 'post_comments'
   ) then
     alter publication supabase_realtime add table public.post_comments;
+  end if;
+  if not exists (
+    select 1
+    from pg_publication_tables
+    where pubname = 'supabase_realtime'
+      and schemaname = 'public'
+      and tablename = 'saved_posts'
+  ) then
+    alter publication supabase_realtime add table public.saved_posts;
   end if;
 end
 $$;

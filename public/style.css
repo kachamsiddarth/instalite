@@ -516,6 +516,11 @@ a.navigation__link:hover,
   margin-left: auto;
 }
 
+.post-action--saved svg {
+  fill: var(--pink);
+  stroke: var(--pink);
+}
+
 .post-card__details {
   padding: 5px 16px 15px;
 }
