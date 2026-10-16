@@ -40,6 +40,7 @@ let authMode = 'sign-in';
 let db;
 let unsubscribePosts;
 let unsubscribeLikes;
+let unsubscribeComments;
 let previewUrl;
 let toastTimeout;
 const postLikeState = new Map();
@@ -188,6 +189,107 @@ async function togglePostLike(postId) {
   }
 }
 
+const maximumCommentLength = 300;
+const postCommentsState = new Map();
+
+function formatCommentCount(count) {
+  return `View all ${count} ${count === 1 ? 'comment' : 'comments'}`;
+}
+
+function rememberPostComments(postId, comments) {
+  postCommentsState.set(postId, comments);
+
+  const card = feedPosts.querySelector(`[data-post-id="${CSS.escape(postId)}"]`);
+  if (card) {
+    syncPostCardComments(card, comments);
+  }
+}
+
+function syncPostCardComments(card, comments) {
+  const list = card.querySelector('[data-comments-list]');
+  const toggle = card.querySelector('[data-comments-toggle]');
+  const latest = comments.slice(-2);
+
+  if (list) {
+    list.replaceChildren(...latest.map((comment) => createCommentItem(comment)));
+  }
+
+  if (toggle) {
+    toggle.hidden = comments.length <= 2;
+    toggle.textContent = formatCommentCount(comments.length);
+    toggle.setAttribute('aria-expanded', String(toggle.dataset.expanded === 'true'));
+  }
+}
+
+function createCommentItem(comment) {
+  const item = document.createElement('li');
+  item.className = 'post-card__comment';
+
+  const author = document.createElement('strong');
+  author.textContent = comment.username;
+
+  const text = document.createElement('span');
+  text.textContent = ` ${comment.body}`;
+
+  const timestamp = document.createElement('time');
+  timestamp.className = 'post-card__comment-time';
+  if (comment.created_at) {
+    timestamp.dateTime = comment.created_at;
+  }
+  timestamp.textContent = ` · ${formatTimeAgo(comment.created_at)}`;
+
+  item.append(author, text, timestamp);
+  return item;
+}
+
+async function refreshPostComments(postId) {
+  try {
+    const { data, error } = await supabase
+      .from('post_comments')
+      .select('id, username, body, created_at')
+      .eq('post_id', postId)
+      .order('created_at', { ascending: true });
+    if (error) throw error;
+    rememberPostComments(postId, data ?? []);
+  } catch (error) {
+    console.error('Unable to load comments for an InstaLite post:', error);
+  }
+}
+
+async function submitPostComment(postId, body) {
+  const trimmed = body.trim();
+  if (!trimmed) {
+    showSuccessToast('Write something before posting your comment.');
+    return;
+  }
+
+  if (trimmed.length > maximumCommentLength) {
+    showSuccessToast(`Keep comments under ${maximumCommentLength} characters.`);
+    return;
+  }
+
+  if (!currentUser) {
+    openAuthDialog();
+    authFeedback.textContent = 'Sign in to comment on posts.';
+    return;
+  }
+
+  try {
+    const username = (currentUser.user_metadata?.display_name || currentUser.email?.split('@')[0] || 'instalite-user').slice(0, 30);
+    const { error } = await supabase.from('post_comments').insert({
+      post_id: postId,
+      user_id: currentUser.id,
+      username,
+      body: trimmed,
+    });
+    if (error) throw error;
+    await refreshPostComments(postId);
+  } catch (error) {
+    console.error('Unable to post an InstaLite comment:', error);
+    showSuccessToast('Could not post your comment. Please try again.');
+  }
+}
+
 function createPostCard(post) {
   const card = document.createElement('article');
   card.className = 'post-card';
@@ -277,19 +379,59 @@ function createPostCard(post) {
   captionText.textContent = post.caption;
   caption.append(captionUsername, captionText);
 
-  const comments = document.createElement('button');
-  comments.className = 'post-card__comments';
-  comments.type = 'button';
-  comments.disabled = true;
-  comments.textContent = 'View comments — coming soon';
+  const commentsList = document.createElement('ul');
+  commentsList.className = 'post-card__comment-list';
+  commentsList.dataset.commentsList = 'true';
+  commentsList.setAttribute('aria-label', 'Latest comments');
+
+  const commentsToggle = document.createElement('button');
+  commentsToggle.className = 'post-card__comments';
+  commentsToggle.type = 'button';
+  commentsToggle.dataset.commentsToggle = 'true';
+  commentsToggle.dataset.expanded = 'false';
+  commentsToggle.hidden = true;
+  commentsToggle.setAttribute('aria-expanded', 'false');
+  commentsToggle.addEventListener('click', () => {
+    const expanded = commentsToggle.dataset.expanded === 'true';
+    commentsToggle.dataset.expanded = String(!expanded);
+    commentsToggle.setAttribute('aria-expanded', String(!expanded));
+    const all = postCommentsState.get(post.id) ?? [];
+    const visible = expanded ? all.slice(-2) : all;
+    commentsList.replaceChildren(...visible.map((comment) => createCommentItem(comment)));
+    commentsToggle.textContent = expanded ? formatCommentCount(all.length) : 'Show fewer comments';
+  });
+
+  const commentForm = document.createElement('form');
+  commentForm.className = 'post-card__comment-form';
+  commentForm.dataset.commentForm = 'true';
+
+  const commentInput = document.createElement('input');
+  commentInput.className = 'post-card__comment-input';
+  commentInput.type = 'text';
+  commentInput.maxLength = maximumCommentLength;
+  commentInput.placeholder = currentUser ? 'Add a comment…' : 'Sign in to comment…';
+  commentInput.setAttribute('aria-label', `Add a comment on ${post.username}'s post`);
+
+  const commentSubmit = document.createElement('button');
+  commentSubmit.className = 'post-card__comment-submit';
+  commentSubmit.type = 'submit';
+  commentSubmit.textContent = 'Post';
+
+  commentForm.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    await submitPostComment(post.id, commentInput.value);
+    commentInput.value = '';
+  });
+  commentForm.append(commentInput, commentSubmit);
 
   const timestamp = document.createElement('time');
   timestamp.className = 'post-card__timestamp';
   timestamp.dateTime = post.timestamp;
   timestamp.textContent = formatTimeAgo(post.timestamp);
 
-  details.append(likes, caption, comments, timestamp);
+  details.append(likes, caption, commentsList, commentsToggle, commentForm, timestamp);
   card.append(header, photo, actions, details);
+  syncPostCardComments(card, postCommentsState.get(post.id) ?? []);
 
   return card;
 }
@@ -331,6 +473,7 @@ function showFeedMessage(message, type, showRetry = false) {
 function listenForPosts() {
   unsubscribePosts?.();
   unsubscribeLikes?.();
+  unsubscribeComments?.();
   showFeedMessage('Finding your little moments…', 'loading');
 
   supabase.from('posts').select('*').order('created_at', { ascending: false }).limit(30).then(({ data, error }) => {
@@ -342,6 +485,7 @@ function listenForPosts() {
     const posts = data.map((post) => ({ ...post, timestamp: post.created_at, userId: post.user_id }));
     feedPosts.replaceChildren(...posts.map(createPostCard));
     refreshVisiblePostLikes();
+    refreshVisiblePostComments();
   }).catch((error) => {
     console.error('Unable to subscribe to the InstaLite feed:', error);
     showFeedMessage('Your feed could not load. Check Supabase setup and try again.', 'error', true);
@@ -351,6 +495,36 @@ function listenForPosts() {
     const postId = payload.new?.post_id ?? payload.old?.post_id;
     if (postId) refreshPostLikes(postId);
   }).subscribe();
+  unsubscribeComments = supabase.channel('posts-comments').on('postgres_changes', { event: '*', schema: 'public', table: 'post_comments' }, (payload) => {
+    const postId = payload.new?.post_id ?? payload.old?.post_id;
+    if (postId) refreshPostComments(postId);
+  }).subscribe();
+}
+
+async function refreshVisiblePostComments() {
+  const cards = [...feedPosts.querySelectorAll('[data-post-id]')];
+  if (!cards.length) return;
+
+  const postIds = cards.map((card) => card.dataset.postId);
+
+  try {
+    const { data, error } = await supabase
+      .from('post_comments')
+      .select('id, post_id, username, body, created_at')
+      .in('post_id', postIds)
+      .order('created_at', { ascending: true });
+    if (error) throw error;
+
+    const byPost = new Map(postIds.map((postId) => [postId, []]));
+    for (const comment of data ?? []) {
+      byPost.get(comment.post_id)?.push(comment);
+    }
+    for (const [postId, comments] of byPost) {
+      rememberPostComments(postId, comments);
+    }
+  } catch (error) {
+    console.error('Unable to load comments for the InstaLite feed:', error);
+  }
 }
 
 async function refreshVisiblePostLikes() {

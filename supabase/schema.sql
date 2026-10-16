@@ -45,6 +45,31 @@ create policy "Users can unlike their own likes" on public.post_likes for delete
 drop policy if exists "Likes cannot be updated" on public.post_likes;
 create policy "Likes cannot be updated" on public.post_likes for update using (false);
 
+-- Comments: signed-in users can comment; text is validated for length
+-- both in the app and here so direct API calls cannot bypass it.
+create table if not exists public.post_comments (
+  id uuid primary key default gen_random_uuid(),
+  post_id uuid not null references public.posts(id) on delete cascade,
+  user_id uuid not null references auth.users(id) on delete cascade,
+  username text not null check (char_length(username) between 1 and 30),
+  body text not null check (char_length(body) between 1 and 300),
+  created_at timestamptz not null default now()
+);
+
+create index if not exists post_comments_post_id_idx on public.post_comments (post_id, created_at);
+alter table public.post_comments enable row level security;
+
+drop policy if exists "Comments are publicly readable" on public.post_comments;
+create policy "Comments are publicly readable" on public.post_comments for select using (true);
+drop policy if exists "Signed-in users can comment" on public.post_comments;
+create policy "Signed-in users can comment" on public.post_comments for insert
+  with check ((select auth.uid()) = user_id);
+drop policy if exists "Users can delete their own comments" on public.post_comments;
+create policy "Users can delete their own comments" on public.post_comments for delete
+  using ((select auth.uid()) = user_id);
+drop policy if exists "Comments cannot be updated" on public.post_comments;
+create policy "Comments cannot be updated" on public.post_comments for update using (false);
+
 insert into storage.buckets (id, name, public)
 values ('post-images', 'post-images', true)
 on conflict (id) do update set public = true;
@@ -65,6 +90,7 @@ create policy "Users can delete their own post images" on storage.objects
 
 alter table public.posts replica identity full;
 alter table public.post_likes replica identity full;
+alter table public.post_comments replica identity full;
 
 do $$
 begin
@@ -85,6 +111,15 @@ begin
       and tablename = 'post_likes'
   ) then
     alter publication supabase_realtime add table public.post_likes;
+  end if;
+  if not exists (
+    select 1
+    from pg_publication_tables
+    where pubname = 'supabase_realtime'
+      and schemaname = 'public'
+      and tablename = 'post_comments'
+  ) then
+    alter publication supabase_realtime add table public.post_comments;
   end if;
 end
 $$;

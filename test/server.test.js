@@ -101,3 +101,24 @@ test('Frontend wires like and unlike actions to the post_likes table', async () 
   assert.match(appScript, /aria-pressed/);
   assert.match(appScript, /Sign in to like posts/);
 });
+
+test('Supabase schema supports validated public comments with owner deletes', async () => {
+  const schema = await fs.readFile(path.join(__dirname, '..', 'supabase', 'schema.sql'), 'utf8');
+
+  assert.match(schema, /create table if not exists public\.post_comments/);
+  assert.match(schema, /char_length\(body\) between 1 and 300/);
+  assert.match(schema, /"Comments are publicly readable" on public\.post_comments for select/);
+  assert.match(schema, /"Signed-in users can comment" on public\.post_comments for insert/);
+  assert.match(schema, /"Users can delete their own comments" on public\.post_comments for delete/);
+  assert.match(schema, /alter publication supabase_realtime add table public\.post_comments/);
+});
+
+test('Frontend wires comment reading and posting to the post_comments table', async () => {
+  const appScript = await fs.readFile(path.join(__dirname, '..', 'public', 'supabase-app.js'), 'utf8');
+
+  assert.match(appScript, /from\('post_comments'\)/);
+  assert.match(appScript, /submitPostComment\(post\.id/);
+  assert.match(appScript, /maximumCommentLength/);
+  assert.match(appScript, /post-card__comment-form/);
+  assert.match(appScript, /Sign in to comment on posts/);
+});

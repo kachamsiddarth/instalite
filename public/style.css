@@ -549,6 +549,85 @@ a.navigation__link:hover,
   color: var(--muted);
   font-size: 11px;
   text-align: left;
+  cursor: pointer;
+}
+
+.post-card__comments:hover {
+  color: var(--pink-dark);
+}
+
+.post-card__comments[hidden] {
+  display: none;
+}
+
+.post-card__comment-list {
+  margin: 6px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+  list-style: none;
+}
+
+.post-card__comment {
+  color: var(--caption-ink);
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.post-card__comment strong {
+  margin-right: 4px;
+  color: var(--heading-ink);
+  font-weight: 650;
+}
+
+.post-card__comment-time {
+  color: var(--soft);
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.post-card__comment-form {
+  margin-top: 8px;
+  display: flex;
+  gap: 8px;
+}
+
+.post-card__comment-input {
+  min-width: 0;
+  flex: 1;
+  min-height: 36px;
+  padding: 8px 10px;
+  border: 1px solid var(--input-line);
+  border-radius: 8px;
+  background: var(--input-paper);
+  color: var(--ink);
+  font: inherit;
+  font-size: 12px;
+}
+
+.post-card__comment-input::placeholder {
+  color: var(--placeholder-ink);
+}
+
+.post-card__comment-input:focus {
+  border-color: var(--input-focus);
+  outline: 3px solid var(--dialog-focus-ring);
+}
+
+.post-card__comment-submit {
+  padding: 0 14px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--pink-dark);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.post-card__comment-submit:hover {
+  text-decoration: underline;
 }
 
 .post-card__timestamp {
