@@ -24,6 +24,9 @@ const uploadPreviewImage = document.querySelector('#upload-preview-image');
 const uploadPreviewName = document.querySelector('#upload-preview-name');
 const uploadPreviewSize = document.querySelector('#upload-preview-size');
 const authButton = document.querySelector('#auth-button');
+const themeToggle = document.querySelector('#theme-toggle');
+const themeToggleMobile = document.querySelector('#theme-toggle-mobile');
+const themeStorageKey = 'instalite-theme';
 const profileUsername = document.querySelector('#profile-username');
 const profileSubtitle = document.querySelector('#profile-subtitle');
 const maximumImageSize = 5 * 1024 * 1024;
@@ -36,8 +39,11 @@ let currentUser = null;
 let authMode = 'sign-in';
 let db;
 let unsubscribePosts;
+let unsubscribeLikes;
+let unsubscribeComments;
 let previewUrl;
 let toastTimeout;
+const postLikeState = new Map();
 
 function formatTimeAgo(timestamp) {
   const postDate = new Date(timestamp);
@@ -79,9 +85,310 @@ function createIcon(pathMarkup, className = '') {
   return icon;
 }
 
+function formatLikeCount(count) {
+  return `${count} ${count === 1 ? 'like' : 'likes'}`;
+}
+
+function setLikeButtonState(likeButton, liked) {
+  likeButton.classList.toggle('post-action--liked', liked);
+  likeButton.dataset.liked = liked ? 'true' : 'false';
+  likeButton.setAttribute('aria-pressed', String(liked));
+  likeButton.setAttribute('aria-label', liked ? 'Unlike this post' : 'Like this post');
+}
+
+function syncPostCardLike(card, state) {
+  const likeButton = card.querySelector('[data-like-button]');
+  const likesLabel = card.querySelector('[data-likes-label]');
+
+  if (likeButton) {
+    const canInteract = Boolean(currentUser);
+    likeButton.disabled = !canInteract;
+    setLikeButtonState(likeButton, state.liked);
+    likeButton.title = canInteract ? '' : 'Sign in to like posts';
+  }
+
+  if (likesLabel) {
+    likesLabel.textContent = formatLikeCount(state.count);
+  }
+}
+
+function rememberPostLike(postId, liked, count) {
+  const next = {
+    liked,
+    count: Math.max(0, Number.isFinite(count) ? count : (postLikeState.get(postId)?.count ?? 0)),
+  };
+  postLikeState.set(postId, next);
+
+  const card = feedPosts.querySelector(`[data-post-id="${CSS.escape(postId)}"]`);
+  if (card) {
+    syncPostCardLike(card, next);
+  }
+}
+
+async function refreshPostLikes(postId) {
+  try {
+    const { count, error: countError } = await supabase
+      .from('post_likes')
+      .select('post_id', { count: 'exact', head: true })
+      .eq('post_id', postId);
+    if (countError) throw countError;
+
+    let liked = false;
+    if (currentUser) {
+      const { data: ownLike, error: ownError } = await supabase
+        .from('post_likes')
+        .select('post_id')
+        .eq('post_id', postId)
+        .eq('user_id', currentUser.id)
+        .maybeSingle();
+      if (ownError) throw ownError;
+      liked = Boolean(ownLike);
+    }
+
+    rememberPostLike(postId, liked, count ?? 0);
+  } catch (error) {
+    console.error('Unable to load likes for an InstaLite post:', error);
+  }
+}
+
+async function togglePostLike(postId) {
+  const card = feedPosts.querySelector(`[data-post-id="${CSS.escape(postId)}"]`);
+  const likeButton = card?.querySelector('[data-like-button]');
+
+  if (!currentUser) {
+    openAuthDialog();
+    authFeedback.textContent = 'Sign in to like posts.';
+    return;
+  }
+
+  const state = postLikeState.get(postId) ?? { liked: false, count: 0 };
+  if (likeButton) likeButton.disabled = true;
+
+  try {
+    if (state.liked) {
+      const { error } = await supabase
+        .from('post_likes')
+        .delete()
+        .eq('post_id', postId)
+        .eq('user_id', currentUser.id);
+      if (error) throw error;
+      rememberPostLike(postId, false, state.count - 1);
+    } else {
+      const { error } = await supabase
+        .from('post_likes')
+        .insert({ post_id: postId, user_id: currentUser.id });
+      if (error) throw error;
+      rememberPostLike(postId, true, state.count + 1);
+    }
+  } catch (error) {
+    console.error('Unable to update the like for an InstaLite post:', error);
+    showSuccessToast('Could not update the like. Please try again.');
+    await refreshPostLikes(postId);
+  } finally {
+    if (likeButton) likeButton.disabled = false;
+  }
+}
+
+const maximumCommentLength = 300;
+const postCommentsState = new Map();
+
+function formatCommentCount(count) {
+  return `View all ${count} ${count === 1 ? 'comment' : 'comments'}`;
+}
+
+function rememberPostComments(postId, comments) {
+  postCommentsState.set(postId, comments);
+
+  const card = feedPosts.querySelector(`[data-post-id="${CSS.escape(postId)}"]`);
+  if (card) {
+    syncPostCardComments(card, comments);
+  }
+}
+
+function syncPostCardComments(card, comments) {
+  const list = card.querySelector('[data-comments-list]');
+  const toggle = card.querySelector('[data-comments-toggle]');
+  const latest = comments.slice(-2);
+
+  if (list) {
+    list.replaceChildren(...latest.map((comment) => createCommentItem(comment)));
+  }
+
+  if (toggle) {
+    toggle.hidden = comments.length <= 2;
+    toggle.textContent = formatCommentCount(comments.length);
+    toggle.setAttribute('aria-expanded', String(toggle.dataset.expanded === 'true'));
+  }
+}
+
+function createCommentItem(comment) {
+  const item = document.createElement('li');
+  item.className = 'post-card__comment';
+
+  const author = document.createElement('strong');
+  author.textContent = comment.username;
+
+  const text = document.createElement('span');
+  text.textContent = ` ${comment.body}`;
+
+  const timestamp = document.createElement('time');
+  timestamp.className = 'post-card__comment-time';
+  if (comment.created_at) {
+    timestamp.dateTime = comment.created_at;
+  }
+  timestamp.textContent = ` · ${formatTimeAgo(comment.created_at)}`;
+
+  item.append(author, text, timestamp);
+  return item;
+}
+
+async function refreshPostComments(postId) {
+  try {
+    const { data, error } = await supabase
+      .from('post_comments')
+      .select('id, username, body, created_at')
+      .eq('post_id', postId)
+      .order('created_at', { ascending: true });
+    if (error) throw error;
+    rememberPostComments(postId, data ?? []);
+  } catch (error) {
+    console.error('Unable to load comments for an InstaLite post:', error);
+  }
+}
+
+async function submitPostComment(postId, body) {
+  const trimmed = body.trim();
+  if (!trimmed) {
+    showSuccessToast('Write something before posting your comment.');
+    return;
+  }
+
+  if (trimmed.length > maximumCommentLength) {
+    showSuccessToast(`Keep comments under ${maximumCommentLength} characters.`);
+    return;
+  }
+
+  if (!currentUser) {
+    openAuthDialog();
+    authFeedback.textContent = 'Sign in to comment on posts.';
+    return;
+  }
+
+  try {
+    // The displayed author name is derived server-side from the auth JWT
+    // via the set_post_comment_username trigger; the client only sends
+    // the post, the owner id, and the comment text.
+    const { error } = await supabase.from('post_comments').insert({
+      post_id: postId,
+      user_id: currentUser.id,
+      username: 'instalite-user',
+      body: trimmed,
+    });
+    if (error) throw error;
+    await refreshPostComments(postId);
+  } catch (error) {
+    console.error('Unable to post an InstaLite comment:', error);
+    showSuccessToast('Could not post your comment. Please try again.');
+  }
+}
+
+const postSavedState = new Map();
+let savedOnlyView = false;
+let unsubscribeSaved;
+
+function setSaveButtonState(saveButton, saved) {
+  saveButton.classList.toggle('post-action--saved', saved);
+  saveButton.dataset.saved = saved ? 'true' : 'false';
+  saveButton.setAttribute('aria-pressed', String(saved));
+  saveButton.setAttribute('aria-label', saved ? 'Unsave this post' : 'Save this post');
+}
+
+function syncPostCardSaved(card, saved) {
+  const saveButton = card.querySelector('[data-save-button]');
+  if (!saveButton) return;
+  const canInteract = Boolean(currentUser);
+  saveButton.disabled = !canInteract;
+  setSaveButtonState(saveButton, saved);
+  saveButton.title = canInteract ? '' : 'Sign in to save posts';
+}
+
+function rememberPostSaved(postId, saved) {
+  postSavedState.set(postId, saved);
+
+  const card = feedPosts.querySelector(`[data-post-id="${CSS.escape(postId)}"]`);
+  if (card) {
+    syncPostCardSaved(card, saved);
+  }
+
+  if (savedOnlyView && !saved) {
+    card?.remove();
+    if (!feedPosts.querySelector('[data-post-id]')) {
+      showFeedMessage('No saved posts yet. Tap the bookmark on a post to keep it here.', 'empty');
+    }
+  }
+}
+
+async function refreshPostSaved(postId) {
+  if (!currentUser) {
+    rememberPostSaved(postId, false);
+    return;
+  }
+
+  try {
+    const { data, error } = await supabase
+      .from('saved_posts')
+      .select('post_id')
+      .eq('post_id', postId)
+      .eq('user_id', currentUser.id)
+      .maybeSingle();
+    if (error) throw error;
+    rememberPostSaved(postId, Boolean(data));
+  } catch (error) {
+    console.error('Unable to load the saved state for an InstaLite post:', error);
+  }
+}
+
+async function togglePostSaved(postId) {
+  if (!currentUser) {
+    openAuthDialog();
+    authFeedback.textContent = 'Sign in to save posts.';
+    return;
+  }
+
+  const card = feedPosts.querySelector(`[data-post-id="${CSS.escape(postId)}"]`);
+  const saveButton = card?.querySelector('[data-save-button]');
+  const saved = postSavedState.get(postId) ?? false;
+  if (saveButton) saveButton.disabled = true;
+
+  try {
+    if (saved) {
+      const { error } = await supabase
+        .from('saved_posts')
+        .delete()
+        .eq('post_id', postId)
+        .eq('user_id', currentUser.id);
+      if (error) throw error;
+      rememberPostSaved(postId, false);
+    } else {
+      const { error } = await supabase
+        .from('saved_posts')
+        .insert({ post_id: postId, user_id: currentUser.id });
+      if (error) throw error;
+      rememberPostSaved(postId, true);
+    }
+  } catch (error) {
+    console.error('Unable to update the saved state for an InstaLite post:', error);
+    showSuccessToast('Could not update your saved posts. Please try again.');
+    await refreshPostSaved(postId);
+  } finally {
+    if (saveButton) saveButton.disabled = false;
+  }
+}
+
 function createPostCard(post) {
   const card = document.createElement('article');
   card.className = 'post-card';
+  card.dataset.postId = post.id;
 
   const header = document.createElement('header');
   header.className = 'post-card__header';
@@ -125,25 +432,31 @@ function createPostCard(post) {
   actions.className = 'post-card__actions';
 
   const likeButton = document.createElement('button');
-  likeButton.className = 'post-action post-action--liked';
+  likeButton.className = 'post-action';
   likeButton.type = 'button';
   likeButton.disabled = true;
-  likeButton.setAttribute('aria-label', 'Likes (not interactive yet)');
+  likeButton.dataset.likeButton = 'true';
+  likeButton.setAttribute('aria-label', 'Like this post');
   likeButton.append(createIcon('M20.8 4.6a5.4 5.4 0 0 0-7.6 0L12 5.8l-1.2-1.2a5.4 5.4 0 0 0-7.6 7.6l1.2 1.2L12 21l7.6-7.6 1.2-1.2a5.4 5.4 0 0 0 0-7.6Z'));
+  likeButton.addEventListener('click', () => togglePostLike(post.id));
 
   const commentButton = document.createElement('button');
   commentButton.className = 'post-action';
   commentButton.type = 'button';
-  commentButton.disabled = true;
-  commentButton.setAttribute('aria-label', 'Comments (coming soon)');
+  commentButton.setAttribute('aria-label', `Comment on ${post.username}'s post`);
   commentButton.append(createIcon('M21 11.5a8.4 8.4 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.4 8.4 0 0 1-3.8-.9L3 21l1.9-5.7a8.4 8.4 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.4 8.4 0 0 1 3.8-.9h.5a8.5 8.5 0 0 1 8 8v.5Z'));
+  commentButton.addEventListener('click', () => {
+    card.querySelector('.post-card__comment-input')?.focus();
+  });
 
   const bookmarkButton = document.createElement('button');
   bookmarkButton.className = 'post-action post-action--save';
   bookmarkButton.type = 'button';
   bookmarkButton.disabled = true;
-  bookmarkButton.setAttribute('aria-label', 'Save post (coming soon)');
+  bookmarkButton.dataset.saveButton = 'true';
+  bookmarkButton.setAttribute('aria-label', 'Save this post');
   bookmarkButton.append(createIcon('M6 4.8A1.8 1.8 0 0 1 7.8 3h8.4A1.8 1.8 0 0 1 18 4.8V21l-6-4-6 4V4.8Z'));
+  bookmarkButton.addEventListener('click', () => togglePostSaved(post.id));
 
   actions.append(likeButton, commentButton, bookmarkButton);
 
@@ -152,6 +465,7 @@ function createPostCard(post) {
 
   const likes = document.createElement('p');
   likes.className = 'post-card__likes';
+  likes.dataset.likesLabel = 'true';
   likes.textContent = '0 likes';
 
   const caption = document.createElement('p');
@@ -164,19 +478,59 @@ function createPostCard(post) {
   captionText.textContent = post.caption;
   caption.append(captionUsername, captionText);
 
-  const comments = document.createElement('button');
-  comments.className = 'post-card__comments';
-  comments.type = 'button';
-  comments.disabled = true;
-  comments.textContent = 'View comments — coming soon';
+  const commentsList = document.createElement('ul');
+  commentsList.className = 'post-card__comment-list';
+  commentsList.dataset.commentsList = 'true';
+  commentsList.setAttribute('aria-label', 'Latest comments');
+
+  const commentsToggle = document.createElement('button');
+  commentsToggle.className = 'post-card__comments';
+  commentsToggle.type = 'button';
+  commentsToggle.dataset.commentsToggle = 'true';
+  commentsToggle.dataset.expanded = 'false';
+  commentsToggle.hidden = true;
+  commentsToggle.setAttribute('aria-expanded', 'false');
+  commentsToggle.addEventListener('click', () => {
+    const expanded = commentsToggle.dataset.expanded === 'true';
+    commentsToggle.dataset.expanded = String(!expanded);
+    commentsToggle.setAttribute('aria-expanded', String(!expanded));
+    const all = postCommentsState.get(post.id) ?? [];
+    const visible = expanded ? all.slice(-2) : all;
+    commentsList.replaceChildren(...visible.map((comment) => createCommentItem(comment)));
+    commentsToggle.textContent = expanded ? formatCommentCount(all.length) : 'Show fewer comments';
+  });
+
+  const commentForm = document.createElement('form');
+  commentForm.className = 'post-card__comment-form';
+  commentForm.dataset.commentForm = 'true';
+
+  const commentInput = document.createElement('input');
+  commentInput.className = 'post-card__comment-input';
+  commentInput.type = 'text';
+  commentInput.maxLength = maximumCommentLength;
+  commentInput.placeholder = currentUser ? 'Add a comment…' : 'Sign in to comment…';
+  commentInput.setAttribute('aria-label', `Add a comment on ${post.username}'s post`);
+
+  const commentSubmit = document.createElement('button');
+  commentSubmit.className = 'post-card__comment-submit';
+  commentSubmit.type = 'submit';
+  commentSubmit.textContent = 'Post';
+
+  commentForm.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    await submitPostComment(post.id, commentInput.value);
+    commentInput.value = '';
+  });
+  commentForm.append(commentInput, commentSubmit);
 
   const timestamp = document.createElement('time');
   timestamp.className = 'post-card__timestamp';
   timestamp.dateTime = post.timestamp;
   timestamp.textContent = formatTimeAgo(post.timestamp);
 
-  details.append(likes, caption, comments, timestamp);
+  details.append(likes, caption, commentsList, commentsToggle, commentForm, timestamp);
   card.append(header, photo, actions, details);
+  syncPostCardComments(card, postCommentsState.get(post.id) ?? []);
 
   return card;
 }
@@ -217,21 +571,158 @@ function showFeedMessage(message, type, showRetry = false) {
 
 function listenForPosts() {
   unsubscribePosts?.();
+  unsubscribeLikes?.();
+  unsubscribeComments?.();
+  unsubscribeSaved?.();
   showFeedMessage('Finding your little moments…', 'loading');
 
-  supabase.from('posts').select('*').order('created_at', { ascending: false }).limit(30).then(({ data, error }) => {
-    if (error) throw error;
-    if (!data?.length) {
-      showFeedMessage('Your feed is taking a little breath. Check back soon.', 'empty');
+  const loadPosts = savedOnlyView && currentUser
+    ? supabase
+      .from('saved_posts')
+      .select('post_id, created_at, posts(*)')
+      .eq('user_id', currentUser.id)
+      .order('created_at', { ascending: false })
+      .limit(30)
+      .then(({ data, error }) => {
+        if (error) throw error;
+        return (data ?? []).map((row) => row.posts).filter(Boolean);
+      })
+    : supabase.from('posts').select('*').order('created_at', { ascending: false }).limit(30).then(({ data, error }) => {
+      if (error) throw error;
+      return data ?? [];
+    });
+
+  loadPosts.then((rows) => {
+    if (!rows.length) {
+      showFeedMessage(
+        savedOnlyView
+          ? 'No saved posts yet. Tap the bookmark on a post to keep it here.'
+          : 'Your feed is taking a little breath. Check back soon.',
+        'empty',
+      );
       return;
     }
-    const posts = data.map((post) => ({ ...post, timestamp: post.created_at, userId: post.user_id }));
+    const posts = rows.map((post) => ({ ...post, timestamp: post.created_at, userId: post.user_id }));
     feedPosts.replaceChildren(...posts.map(createPostCard));
+    refreshVisiblePostLikes();
+    refreshVisiblePostComments();
+    refreshVisiblePostSaved();
   }).catch((error) => {
     console.error('Unable to subscribe to the InstaLite feed:', error);
     showFeedMessage('Your feed could not load. Check Supabase setup and try again.', 'error', true);
   });
   unsubscribePosts = supabase.channel('posts-feed').on('postgres_changes', { event: '*', schema: 'public', table: 'posts' }, listenForPosts).subscribe();
+  unsubscribeLikes = supabase.channel('posts-likes').on('postgres_changes', { event: '*', schema: 'public', table: 'post_likes' }, (payload) => {
+    const postId = payload.new?.post_id ?? payload.old?.post_id;
+    if (postId) refreshPostLikes(postId);
+  }).subscribe();
+  unsubscribeComments = supabase.channel('posts-comments').on('postgres_changes', { event: '*', schema: 'public', table: 'post_comments' }, (payload) => {
+    const postId = payload.new?.post_id ?? payload.old?.post_id;
+    if (postId) refreshPostComments(postId);
+  }).subscribe();
+  unsubscribeSaved = supabase.channel('posts-saved').on('postgres_changes', { event: '*', schema: 'public', table: 'saved_posts' }, (payload) => {
+    if (payload.new && payload.old) return;
+    const postId = payload.new?.post_id ?? payload.old?.post_id;
+    if (postId) refreshPostSaved(postId);
+  }).subscribe();
+}
+
+async function refreshVisiblePostSaved() {
+  const cards = [...feedPosts.querySelectorAll('[data-post-id]')];
+  if (!cards.length) return;
+
+  if (!currentUser) {
+    for (const card of cards) {
+      syncPostCardSaved(card, false);
+      postSavedState.set(card.dataset.postId, false);
+    }
+    return;
+  }
+
+  const postIds = cards.map((card) => card.dataset.postId);
+
+  try {
+    const { data, error } = await supabase
+      .from('saved_posts')
+      .select('post_id')
+      .in('post_id', postIds)
+      .eq('user_id', currentUser.id);
+    if (error) throw error;
+    const savedIds = new Set((data ?? []).map((row) => row.post_id));
+    for (const postId of postIds) {
+      rememberPostSaved(postId, savedIds.has(postId));
+    }
+  } catch (error) {
+    console.error('Unable to load saved posts for the InstaLite feed:', error);
+  }
+}
+
+async function refreshVisiblePostComments() {
+  const cards = [...feedPosts.querySelectorAll('[data-post-id]')];
+  if (!cards.length) return;
+
+  const postIds = cards.map((card) => card.dataset.postId);
+
+  try {
+    const { data, error } = await supabase
+      .from('post_comments')
+      .select('id, post_id, username, body, created_at')
+      .in('post_id', postIds)
+      .order('created_at', { ascending: true });
+    if (error) throw error;
+
+    const byPost = new Map(postIds.map((postId) => [postId, []]));
+    for (const comment of data ?? []) {
+      byPost.get(comment.post_id)?.push(comment);
+    }
+    for (const [postId, comments] of byPost) {
+      rememberPostComments(postId, comments);
+    }
+  } catch (error) {
+    console.error('Unable to load comments for the InstaLite feed:', error);
+  }
+}
+
+async function refreshVisiblePostLikes() {
+  const cards = [...feedPosts.querySelectorAll('[data-post-id]')];
+  if (!cards.length) return;
+
+  const postIds = cards.map((card) => card.dataset.postId);
+
+  try {
+    const { data: likeRows, error: likesError } = await supabase
+      .from('post_likes')
+      .select('post_id')
+      .in('post_id', postIds);
+    if (likesError) throw likesError;
+
+    const counts = new Map();
+    for (const row of likeRows ?? []) {
+      counts.set(row.post_id, (counts.get(row.post_id) ?? 0) + 1);
+    }
+
+    let likedIds = new Set();
+    if (currentUser) {
+      const { data: ownLikes, error: ownError } = await supabase
+        .from('post_likes')
+        .select('post_id')
+        .in('post_id', postIds)
+        .eq('user_id', currentUser.id);
+      if (ownError) throw ownError;
+      likedIds = new Set((ownLikes ?? []).map((row) => row.post_id));
+    }
+
+    for (const postId of postIds) {
+      rememberPostLike(postId, likedIds.has(postId), counts.get(postId) ?? 0);
+    }
+  } catch (error) {
+    console.error('Unable to load likes for the InstaLite feed:', error);
+    for (const postId of postIds) {
+      const state = postLikeState.get(postId) ?? { liked: false, count: 0 };
+      const card = feedPosts.querySelector(`[data-post-id="${CSS.escape(postId)}"]`);
+      if (card) syncPostCardLike(card, state);
+    }
+  }
 }
 
 function setAuthMode(mode) {
@@ -323,6 +814,61 @@ function showSuccessToast(message) {
   }, 4000);
 }
 
+function readStoredTheme() {
+  try {
+    return localStorage.getItem(themeStorageKey) === 'dark' ? 'dark' : 'light';
+  } catch (error) {
+    return document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
+  }
+}
+
+function syncThemeControls(theme) {
+  const isDark = theme === 'dark';
+  const label = isDark ? 'Switch to light mode' : 'Switch to dark mode';
+
+  for (const toggle of [themeToggle, themeToggleMobile]) {
+    if (!toggle) continue;
+    toggle.setAttribute('aria-pressed', String(isDark));
+    toggle.setAttribute('aria-label', label);
+  }
+
+  if (themeToggle) {
+    themeToggle.querySelector('.theme-toggle__label').textContent = isDark ? 'Light mode' : 'Dark mode';
+  }
+
+  if (themeToggleMobile) {
+    themeToggleMobile.textContent = isDark ? '☀' : '☾';
+  }
+}
+
+function applyTheme(theme) {
+  if (theme === 'dark') {
+    document.documentElement.setAttribute('data-theme', 'dark');
+  } else {
+    document.documentElement.removeAttribute('data-theme');
+  }
+
+  try {
+    localStorage.setItem(themeStorageKey, theme);
+  } catch (error) {
+    /* localStorage unavailable — the theme still applies for this visit. */
+  }
+
+  syncThemeControls(theme);
+}
+
+function initializeTheme() {
+  // The inline head script may already have applied the stored theme;
+  // sync the toggle controls with whatever is currently active.
+  applyTheme(readStoredTheme());
+  themeToggle?.addEventListener('click', () => {
+    applyTheme(document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark');
+  });
+  themeToggleMobile?.addEventListener('click', () => {
+    applyTheme(document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark');
+  });
+}
+
 function updateSignedInProfile(user) {
   currentUser = user;
   const username = user?.user_metadata?.display_name || user?.email?.split('@')[0] || 'your.name';
@@ -333,6 +879,123 @@ function updateSignedInProfile(user) {
   profileUsername.textContent = username;
   profileSubtitle.textContent = user?.email || 'Sign in to share a moment';
   document.querySelector('#open-auth-mobile').setAttribute('aria-label', signedIn ? 'Sign out' : 'Sign in');
+
+  if (!signedIn && savedOnlyView) {
+    setSavedOnlyView(false);
+    return;
+  }
+
+  if (feedPosts.querySelector('[data-post-id]')) {
+    refreshVisiblePostLikes();
+    refreshVisiblePostSaved();
+  }
+  syncSavedLink();
+}
+
+function syncSavedLink() {
+  const savedLink = document.querySelector('#saved-posts-link');
+  if (!savedLink) return;
+  savedLink.setAttribute('aria-pressed', String(savedOnlyView));
+  savedLink.classList.toggle('navigation__link--active', savedOnlyView);
+  savedLink.querySelector('span').textContent = savedOnlyView ? 'Saved ✓' : 'Saved';
+}
+
+function setSavedOnlyView(enabled) {
+  if (enabled && !currentUser) {
+    openAuthDialog();
+    authFeedback.textContent = 'Sign in to view your saved posts.';
+    return;
+  }
+
+  savedOnlyView = enabled;
+  syncSavedLink();
+  listenForPosts();
+}
+
+function initializeSavedView() {
+  syncSavedLink();
+  document.querySelector('#saved-posts-link')?.addEventListener('click', () => {
+    setSavedOnlyView(!savedOnlyView);
+  });
+}
+
+function collectStories() {
+  return [...document.querySelectorAll('.story[data-story-index]')].map((story) => ({
+    name: story.dataset.storyName || story.querySelector('.story__name')?.textContent?.trim() || 'Story',
+    image: story.dataset.storyImage || story.querySelector('img')?.src || '',
+    avatar: story.querySelector('img')?.src || '',
+  }));
+}
+
+let storyIndex = 0;
+
+function renderStoryViewer() {
+  const stories = collectStories();
+  if (!stories.length) return;
+
+  storyIndex = (storyIndex + stories.length) % stories.length;
+  const story = stories[storyIndex];
+  const dialog = document.querySelector('#story-viewer');
+
+  document.querySelector('#story-viewer-image').src = story.image;
+  document.querySelector('#story-viewer-image').alt = `Story by ${story.name}`;
+  document.querySelector('#story-viewer-avatar').src = story.avatar;
+  document.querySelector('#story-viewer-name').textContent = story.name;
+  document.querySelector('#story-viewer-position').textContent = `${storyIndex + 1} / ${stories.length}`;
+
+  const progress = document.querySelector('#story-viewer-progress');
+  progress.replaceChildren(...stories.map((_, index) => {
+    const segment = document.createElement('span');
+    segment.className = 'story-viewer__segment';
+    if (index < storyIndex) segment.dataset.seen = 'true';
+    if (index === storyIndex) segment.dataset.active = 'true';
+    return segment;
+  }));
+
+  document.querySelector('#story-viewer-prev').disabled = storyIndex === 0;
+  document.querySelector('#story-viewer-next').disabled = storyIndex === stories.length - 1;
+  dialog.dataset.storyIndex = String(storyIndex);
+}
+
+function openStoryViewer(index) {
+  storyIndex = index;
+  renderStoryViewer();
+  document.querySelector('#story-viewer').showModal();
+  document.querySelector('#close-story-viewer').focus();
+}
+
+function stepStoryViewer(delta) {
+  const stories = collectStories();
+  const next = storyIndex + delta;
+  if (next < 0 || next >= stories.length) return;
+  storyIndex = next;
+  renderStoryViewer();
+}
+
+function initializeStoryViewer() {
+  document.querySelectorAll('.story[data-story-index]').forEach((story) => {
+    story.addEventListener('click', () => {
+      openStoryViewer(Number(story.dataset.storyIndex) || 0);
+    });
+  });
+
+  document.querySelector('#close-story-viewer')?.addEventListener('click', () => {
+    document.querySelector('#story-viewer').close();
+  });
+  document.querySelector('#story-viewer-prev')?.addEventListener('click', () => stepStoryViewer(-1));
+  document.querySelector('#story-viewer-next')?.addEventListener('click', () => stepStoryViewer(1));
+
+  document.querySelector('#story-viewer')?.addEventListener('keydown', (event) => {
+    if (event.key === 'ArrowRight') {
+      event.preventDefault();
+      stepStoryViewer(1);
+    } else if (event.key === 'ArrowLeft') {
+      event.preventDefault();
+      stepStoryViewer(-1);
+    } else if (event.key === 'Escape') {
+      document.querySelector('#story-viewer').close();
+    }
+  });
 }
 
 function getAuthErrorMessage(error, mode) {
@@ -363,6 +1026,10 @@ if (todayDate) {
     year: 'numeric',
   });
 }
+
+initializeTheme();
+initializeSavedView();
+initializeStoryViewer();
 
 if (!configIsReady && !useEmulators) {
   showFeedMessage('Supabase is not configured. Copy .env.example to .env and add your project values.', 'error');

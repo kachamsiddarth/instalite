@@ -8,6 +8,16 @@
     <title>InstaLite — A little life, shared.</title>
     <link rel="preconnect" href="https://images.unsplash.com">
     <link rel="stylesheet" href="/style.css">
+    <script>
+      // Apply the saved theme before first paint to avoid a light-mode flash.
+      try {
+        if (localStorage.getItem('instalite-theme') === 'dark') {
+          document.documentElement.setAttribute('data-theme', 'dark');
+        }
+      } catch (error) {
+        /* localStorage unavailable — stay on the light theme. */
+      }
+    </script>
     <script type="module" src="/supabase-app.js"></script>
   </head>
   <body>
@@ -41,6 +51,10 @@
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 9a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9"/><path d="M10 22h4"/></svg>
             <span>Notifications</span>
           </button>
+          <button class="navigation__link" id="saved-posts-link" type="button" aria-pressed="false">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 4.8A1.8 1.8 0 0 1 7.8 3h8.4A1.8 1.8 0 0 1 18 4.8V21l-6-4-6 4V4.8Z"/></svg>
+            <span>Saved</span>
+          </button>
           <button class="navigation__link navigation__link--create" id="open-create-post" type="button">
             <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="5"/><path d="M12 8v8m-4-4h8"/></svg>
             <span>Create post</span>
@@ -49,6 +63,11 @@
           <button class="navigation__link navigation__profile" id="auth-button" type="button">
             <img src="https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=96&h=96&q=80" alt="" width="26" height="26">
             <span>Sign in</span>
+          </button>
+          <button class="theme-toggle" id="theme-toggle" type="button" aria-pressed="false" aria-label="Switch to dark mode">
+            <span class="theme-toggle__icon theme-toggle__icon--sun" aria-hidden="true">☾</span>
+            <span class="theme-toggle__icon theme-toggle__icon--moon" aria-hidden="true">☀</span>
+            <span class="theme-toggle__label">Dark mode</span>
           </button>
         </nav>
 
@@ -70,36 +89,37 @@
             </span>
             <span>InstaLite</span>
           </a>
+          <button class="mobile-theme-toggle" id="theme-toggle-mobile" type="button" aria-pressed="false" aria-label="Switch to dark mode">☾</button>
           <button class="mobile-search" type="button" disabled aria-label="Search (coming soon)">
             <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.8" cy="10.8" r="6.8"/><path d="m16 16 5 5"/></svg>
           </button>
         </header>
 
         <section class="stories" aria-label="Stories">
-          <div class="story">
+          <button class="story" type="button" data-story-index="0" data-story-name="Your story" data-story-image="https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=900&h=1200&q=80" aria-haspopup="dialog">
             <span class="story__ring"><img src="https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=120&h=120&q=80" alt=""></span>
             <span class="story__name">Your story</span>
-          </div>
-          <div class="story">
+          </button>
+          <button class="story" type="button" data-story-index="1" data-story-name="leo.park" data-story-image="https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&w=900&h=1200&q=80" aria-haspopup="dialog">
             <span class="story__ring"><img src="https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&w=120&h=120&q=80" alt=""></span>
             <span class="story__name">leo.park</span>
-          </div>
-          <div class="story">
+          </button>
+          <button class="story" type="button" data-story-index="2" data-story-name="nina.rivers" data-story-image="https://images.unsplash.com/photo-1531123897727-8f129e1688ce?auto=format&fit=crop&w=900&h=1200&q=80" aria-haspopup="dialog">
             <span class="story__ring"><img src="https://images.unsplash.com/photo-1531123897727-8f129e1688ce?auto=format&fit=crop&w=120&h=120&q=80" alt=""></span>
             <span class="story__name">nina.rivers</span>
-          </div>
-          <div class="story">
+          </button>
+          <button class="story" type="button" data-story-index="3" data-story-name="ellie.w" data-story-image="https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=900&h=1200&q=80&sat=-30" aria-haspopup="dialog">
             <span class="story__ring"><img src="https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=120&h=120&q=80&sat=-30" alt=""></span>
             <span class="story__name">ellie.w</span>
-          </div>
-          <div class="story">
+          </button>
+          <button class="story" type="button" data-story-index="4" data-story-name="milo.gray" data-story-image="https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?auto=format&fit=crop&w=900&h=1200&q=80" aria-haspopup="dialog">
             <span class="story__ring"><img src="https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?auto=format&fit=crop&w=120&h=120&q=80" alt=""></span>
             <span class="story__name">milo.gray</span>
-          </div>
-          <div class="story">
+          </button>
+          <button class="story" type="button" data-story-index="5" data-story-name="zoe.sun" data-story-image="https://images.unsplash.com/photo-1517841905240-472988babdf9?auto=format&fit=crop&w=900&h=1200&q=80" aria-haspopup="dialog">
             <span class="story__ring"><img src="https://images.unsplash.com/photo-1517841905240-472988babdf9?auto=format&fit=crop&w=120&h=120&q=80" alt=""></span>
             <span class="story__name">zoe.sun</span>
-          </div>
+          </button>
         </section>
 
         <section class="feed" aria-label="Photo feed" aria-live="polite">
@@ -244,6 +264,18 @@
         <p class="create-form__feedback" id="create-post-feedback" role="status" aria-live="polite"></p>
         <button class="create-form__submit" id="submit-create-post" type="submit">Share post</button>
       </form>
+    </dialog>
+    <dialog class="story-viewer" id="story-viewer" aria-labelledby="story-viewer-name">
+      <div class="story-viewer__progress" id="story-viewer-progress" aria-hidden="true"></div>
+      <header class="story-viewer__header">
+        <img class="avatar" id="story-viewer-avatar" alt="" width="32" height="32">
+        <strong id="story-viewer-name"></strong>
+        <span class="story-viewer__position" id="story-viewer-position"></span>
+        <button class="story-viewer__close" id="close-story-viewer" type="button" aria-label="Close story viewer">×</button>
+      </header>
+      <img class="story-viewer__image" id="story-viewer-image" alt="Story photo">
+      <button class="story-viewer__nav story-viewer__nav--prev" id="story-viewer-prev" type="button" aria-label="Previous story">‹</button>
+      <button class="story-viewer__nav story-viewer__nav--next" id="story-viewer-next" type="button" aria-label="Next story">›</button>
     </dialog>
     <p class="toast" id="post-success-toast" role="status" aria-live="polite" hidden></p>
   </body>
