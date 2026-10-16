@@ -8,6 +8,16 @@
     <title>InstaLite — A little life, shared.</title>
     <link rel="preconnect" href="https://images.unsplash.com">
     <link rel="stylesheet" href="/style.css">
+    <script>
+      // Apply the saved theme before first paint to avoid a light-mode flash.
+      try {
+        if (localStorage.getItem('instalite-theme') === 'dark') {
+          document.documentElement.setAttribute('data-theme', 'dark');
+        }
+      } catch (error) {
+        /* localStorage unavailable — stay on the light theme. */
+      }
+    </script>
     <script type="module" src="/supabase-app.js"></script>
   </head>
   <body>
@@ -50,6 +60,11 @@
             <img src="https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=96&h=96&q=80" alt="" width="26" height="26">
             <span>Sign in</span>
           </button>
+          <button class="theme-toggle" id="theme-toggle" type="button" aria-pressed="false" aria-label="Switch to dark mode">
+            <span class="theme-toggle__icon theme-toggle__icon--sun" aria-hidden="true">☾</span>
+            <span class="theme-toggle__icon theme-toggle__icon--moon" aria-hidden="true">☀</span>
+            <span class="theme-toggle__label">Dark mode</span>
+          </button>
         </nav>
 
         <div class="sidebar__footer">
@@ -70,6 +85,7 @@
             </span>
             <span>InstaLite</span>
           </a>
+          <button class="mobile-theme-toggle" id="theme-toggle-mobile" type="button" aria-pressed="false" aria-label="Switch to dark mode">☾</button>
           <button class="mobile-search" type="button" disabled aria-label="Search (coming soon)">
             <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.8" cy="10.8" r="6.8"/><path d="m16 16 5 5"/></svg>
           </button>
