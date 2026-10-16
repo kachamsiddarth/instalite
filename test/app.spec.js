@@ -33,12 +33,15 @@ const { expect, test } = require('@playwright/test');
  */
 async function gotoHome(page) {
   await page.goto('/');
-  // Supabase-app.js is a module script; wait for it to update the feed area.
+  // Supabase-app.js is a module script; wait for it to update the feed area
+  // and finish wiring the theme controls before interacting.
   await page.waitForFunction(() => {
     const el = document.querySelector('#feed-posts');
     // The inline HTML placeholder text is "Finding your little moments…".
     // Supabase-app.js replaces it with an error message when not configured.
-    return el && el.textContent.trim().length > 0;
+    const feedReady = el && el.textContent.trim().length > 0;
+    const themeReady = document.querySelector('#theme-toggle')?.getAttribute('data-theme-ready') === 'true';
+    return feedReady && themeReady;
   }, { timeout: 10_000 });
 }
 

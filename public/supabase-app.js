@@ -38,9 +38,10 @@ const supportedImageTypes = new Map([
 let currentUser = null;
 let authMode = 'sign-in';
 let db;
-let unsubscribePosts;
-let unsubscribeLikes;
-let unsubscribeComments;
+let postsChannel;
+let likesChannel;
+let commentsChannel;
+let savedChannel;
 let previewUrl;
 let toastTimeout;
 const postLikeState = new Map();
@@ -296,7 +297,6 @@ async function submitPostComment(postId, body) {
 
 const postSavedState = new Map();
 let savedOnlyView = false;
-let unsubscribeSaved;
 
 function setSaveButtonState(saveButton, saved) {
   saveButton.classList.toggle('post-action--saved', saved);
@@ -573,11 +573,22 @@ function showFeedMessage(message, type, showRetry = false) {
   feedPosts.replaceChildren(messageBox);
 }
 
+function removeFeedChannels() {
+  // subscribe() resolves to a RealtimeChannel object, not an unsubscribe
+  // function, so channels must be removed via removeChannel().
+  for (const channel of [postsChannel, likesChannel, commentsChannel, savedChannel]) {
+    if (channel) {
+      supabase.removeChannel(channel);
+    }
+  }
+  postsChannel = undefined;
+  likesChannel = undefined;
+  commentsChannel = undefined;
+  savedChannel = undefined;
+}
+
 function listenForPosts() {
-  unsubscribePosts?.();
-  unsubscribeLikes?.();
-  unsubscribeComments?.();
-  unsubscribeSaved?.();
+  removeFeedChannels();
   showFeedMessage('Finding your little moments…', 'loading');
 
   const loadPosts = savedOnlyView && currentUser
@@ -615,16 +626,16 @@ function listenForPosts() {
     console.error('Unable to subscribe to the InstaLite feed:', error);
     showFeedMessage('Your feed could not load. Check Supabase setup and try again.', 'error', true);
   });
-  unsubscribePosts = supabase.channel('posts-feed').on('postgres_changes', { event: '*', schema: 'public', table: 'posts' }, listenForPosts).subscribe();
-  unsubscribeLikes = supabase.channel('posts-likes').on('postgres_changes', { event: '*', schema: 'public', table: 'post_likes' }, (payload) => {
+  postsChannel = supabase.channel('posts-feed').on('postgres_changes', { event: '*', schema: 'public', table: 'posts' }, listenForPosts).subscribe();
+  likesChannel = supabase.channel('posts-likes').on('postgres_changes', { event: '*', schema: 'public', table: 'post_likes' }, (payload) => {
     const postId = payload.new?.post_id ?? payload.old?.post_id;
     if (postId) refreshPostLikes(postId);
   }).subscribe();
-  unsubscribeComments = supabase.channel('posts-comments').on('postgres_changes', { event: '*', schema: 'public', table: 'post_comments' }, (payload) => {
+  commentsChannel = supabase.channel('posts-comments').on('postgres_changes', { event: '*', schema: 'public', table: 'post_comments' }, (payload) => {
     const postId = payload.new?.post_id ?? payload.old?.post_id;
     if (postId) refreshPostComments(postId);
   }).subscribe();
-  unsubscribeSaved = supabase.channel('posts-saved').on('postgres_changes', { event: '*', schema: 'public', table: 'saved_posts' }, (payload) => {
+  savedChannel = supabase.channel('posts-saved').on('postgres_changes', { event: '*', schema: 'public', table: 'saved_posts' }, (payload) => {
     if (payload.new && payload.old) return;
     const postId = payload.new?.post_id ?? payload.old?.post_id;
     if (postId) refreshPostSaved(postId);
@@ -873,6 +884,11 @@ function initializeTheme() {
   themeToggleMobile?.addEventListener('click', () => {
     applyTheme(document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark');
   });
+  // Signal that the module script finished wiring the theme controls.
+  // (aria-pressed can't serve as the signal — it's in the initial HTML.)
+  for (const toggle of [themeToggle, themeToggleMobile]) {
+    toggle?.setAttribute('data-theme-ready', 'true');
+  }
 }
 
 function updateSignedInProfile(user) {

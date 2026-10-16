@@ -195,6 +195,32 @@ test('Frontend keeps failed comments in the input and closes the viewer on backd
   assert.match(appScript, /event\.target === event\.currentTarget/);
 });
 
+test('Frontend removes realtime channels via removeChannel, not callables', async () => {
+  const appScript = await fs.readFile(path.join(__dirname, '..', 'public', 'supabase-app.js'), 'utf8');
+  const listener = appScript.slice(
+    appScript.indexOf('function removeFeedChannels'),
+    appScript.indexOf('async function refreshVisiblePostSaved'),
+  );
+
+  assert.match(listener, /supabase\.removeChannel\(channel\)/);
+  assert.match(appScript, /let postsChannel;/);
+  assert.match(appScript, /let likesChannel;/);
+  assert.match(appScript, /let commentsChannel;/);
+  assert.match(appScript, /let savedChannel;/);
+  assert.doesNotMatch(appScript, /unsubscribePosts\?\.\(\)/);
+  assert.doesNotMatch(appScript, /unsubscribeLikes\?\.\(\)/);
+  assert.doesNotMatch(appScript, /unsubscribeComments\?\.\(\)/);
+  assert.doesNotMatch(appScript, /unsubscribeSaved\?\.\(\)/);
+});
+
+test('Theme init marks toggles ready after wiring handlers', async () => {
+  const appScript = await fs.readFile(path.join(__dirname, '..', 'public', 'supabase-app.js'), 'utf8');
+  const spec = await fs.readFile(path.join(__dirname, 'app.spec.js'), 'utf8');
+
+  assert.match(appScript, /data-theme-ready/);
+  assert.match(spec, /data-theme-ready/);
+});
+
 test('Story circles open a viewer with navigation and close controls', async () => {
   const page = await fs.readFile(path.join(__dirname, '..', 'public', 'index.html'), 'utf8');
   const appScript = await fs.readFile(path.join(__dirname, '..', 'public', 'supabase-app.js'), 'utf8');
