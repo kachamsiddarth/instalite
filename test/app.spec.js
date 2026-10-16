@@ -240,31 +240,89 @@ test.describe('Static asset routing', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Feature-specific checks (add blocks here as workshop issues are implemented)
+// Interactive story viewer (Feature 1)
 // ---------------------------------------------------------------------------
 
-// TEMPLATE — uncomment and fill in when a feature is implemented.
-// Each block must be self-contained and must NOT depend on other blocks.
-//
-// test.describe('Dark mode (issue #N)', () => {
-//   test('toggle switches the colour scheme', async ({ page }) => {
-//     await gotoHome(page);
-//     const toggle = page.locator('#dark-mode-toggle'); // use real selector
-//     await toggle.click();
-//     await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
-//   });
-// });
-//
-// test.describe('Like / unlike posts (issue #N)', () => {
-//   test.beforeEach(async ({ page }) => {
-//     await page.waitForSelector('.post-card');
-//   });
-//   test('like button increments the count', async ({ page }) => { ... });
-//   test('clicking again decrements the count', async ({ page }) => { ... });
-// });
-//
-// test.describe('Save / unsave posts (issue #N)', () => { ... });
-// test.describe('Comments (issue #N)', () => { ... });
-// test.describe('Edit profile (issue #N)', () => { ... });
+test.describe('Interactive story viewer (Feature 1)', () => {
+  test.beforeEach(async ({ page }) => {
+    await page.goto('/');
+    await page.waitForSelector('.app-shell', { state: 'attached' });
+  });
 
+  test('story viewer dialog is attached and closed by default', async ({ page }) => {
+    const dialog = page.locator('#story-dialog');
+    await expect(dialog).toBeAttached();
+    await expect(dialog).not.toHaveAttribute('open', '');
+  });
 
+  test('clicking a story circle opens the story viewer and displays author', async ({ page }) => {
+    const storyCircle = page.locator('.stories button.story').nth(1); // leo.park
+    await storyCircle.click();
+
+    const dialog = page.locator('#story-dialog');
+    await expect(dialog).toHaveAttribute('open', '');
+    await expect(page.locator('#story-author-username')).toHaveText('leo.park');
+    await expect(page.locator('#story-image')).toHaveAttribute('src', /images\.unsplash\.com/);
+  });
+
+  test('navigates to the next and previous stories with buttons', async ({ page }) => {
+    await page.locator('.stories button.story').nth(1).click();
+    await expect(page.locator('#story-author-username')).toHaveText('leo.park');
+
+    await page.locator('#next-story').click();
+    await expect(page.locator('#story-author-username')).toHaveText('nina.rivers');
+
+    await page.locator('#prev-story').click();
+    await expect(page.locator('#story-author-username')).toHaveText('leo.park');
+  });
+
+  test('enforces boundary conditions for navigation buttons', async ({ page }) => {
+    await page.locator('.stories button.story').first().click();
+    await expect(page.locator('#story-author-username')).toHaveText('Your story');
+    await expect(page.locator('#prev-story')).toBeDisabled();
+    await expect(page.locator('#next-story')).toBeEnabled();
+
+    await page.locator('#close-story').click();
+    await page.locator('.stories button.story').last().click();
+    await expect(page.locator('#story-author-username')).toHaveText('zoe.sun');
+    await expect(page.locator('#next-story')).toBeDisabled();
+    await expect(page.locator('#prev-story')).toBeEnabled();
+  });
+
+  test('closes the story viewer with the close button', async ({ page }) => {
+    await page.locator('.stories button.story').first().click();
+    const dialog = page.locator('#story-dialog');
+    await expect(dialog).toHaveAttribute('open', '');
+
+    await page.locator('#close-story').click();
+    await expect(dialog).not.toHaveAttribute('open', '');
+  });
+
+  test('supports keyboard navigation with arrow keys and Escape to close', async ({ page }) => {
+    await page.locator('.stories button.story').nth(1).click();
+    await expect(page.locator('#story-author-username')).toHaveText('leo.park');
+
+    await page.keyboard.press('ArrowRight');
+    await expect(page.locator('#story-author-username')).toHaveText('nina.rivers');
+
+    await page.keyboard.press('ArrowLeft');
+    await expect(page.locator('#story-author-username')).toHaveText('leo.park');
+
+    await page.keyboard.press('Escape');
+    const dialog = page.locator('#story-dialog');
+    await expect(dialog).not.toHaveAttribute('open', '');
+  });
+
+  test('responsive on mobile viewport', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.locator('.stories button.story').first().click();
+
+    const dialog = page.locator('#story-dialog');
+    await expect(dialog).toHaveAttribute('open', '');
+    await expect(page.locator('#story-author-username')).toBeVisible();
+    await expect(page.locator('#close-story')).toBeVisible();
+
+    await page.locator('#close-story').click();
+    await expect(dialog).not.toHaveAttribute('open', '');
+  });
+});

@@ -364,7 +364,7 @@ if (todayDate) {
   });
 }
 
-if (!configIsReady && !useEmulators) {
+if (!configIsReady) {
   showFeedMessage('Supabase is not configured. Copy .env.example to .env and add your project values.', 'error');
   authButton.disabled = true;
   document.querySelector('#open-create-post').disabled = true;
@@ -581,3 +581,162 @@ if (!configIsReady && !useEmulators) {
   setAuthMode('sign-in');
   listenForPosts();
 }
+
+// ---------------------------------------------------------------------------
+// Interactive Story Viewer
+// ---------------------------------------------------------------------------
+
+const sampleStories = [
+  {
+    username: 'Your story',
+    avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=120&h=120&q=80',
+    image: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=800&h=1200&q=80',
+    time: '2h ago',
+  },
+  {
+    username: 'leo.park',
+    avatar: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&w=120&h=120&q=80',
+    image: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&w=800&h=1200&q=80',
+    time: '4h ago',
+  },
+  {
+    username: 'nina.rivers',
+    avatar: 'https://images.unsplash.com/photo-1531123897727-8f129e1688ce?auto=format&fit=crop&w=120&h=120&q=80',
+    image: 'https://images.unsplash.com/photo-1531123897727-8f129e1688ce?auto=format&fit=crop&w=800&h=1200&q=80',
+    time: '6h ago',
+  },
+  {
+    username: 'ellie.w',
+    avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=120&h=120&q=80&sat=-30',
+    image: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=800&h=1200&q=80',
+    time: '8h ago',
+  },
+  {
+    username: 'milo.gray',
+    avatar: 'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?auto=format&fit=crop&w=120&h=120&q=80',
+    image: 'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?auto=format&fit=crop&w=800&h=1200&q=80',
+    time: '11h ago',
+  },
+  {
+    username: 'zoe.sun',
+    avatar: 'https://images.unsplash.com/photo-1517841905240-472988babdf9?auto=format&fit=crop&w=120&h=120&q=80',
+    image: 'https://images.unsplash.com/photo-1517841905240-472988babdf9?auto=format&fit=crop&w=800&h=1200&q=80',
+    time: '14h ago',
+  },
+];
+
+function initStoryViewer() {
+  const storyDialog = document.querySelector('#story-dialog');
+  if (!storyDialog) return;
+
+  const storyAuthorUsername = document.querySelector('#story-author-username');
+  const storyAuthorAvatar = document.querySelector('#story-author-avatar');
+  const storyTime = document.querySelector('#story-time');
+  const storyImage = document.querySelector('#story-image');
+  const storyProgress = document.querySelector('#story-progress');
+  const closeStoryBtn = document.querySelector('#close-story');
+  const prevStoryBtn = document.querySelector('#prev-story');
+  const nextStoryBtn = document.querySelector('#next-story');
+  const storyButtons = document.querySelectorAll('.stories .story');
+
+  let currentStoryIndex = 0;
+  let lastActiveTrigger = null;
+
+  function renderProgressBars(activeIndex) {
+    if (!storyProgress) return;
+    storyProgress.replaceChildren();
+    sampleStories.forEach((_, idx) => {
+      const bar = document.createElement('div');
+      bar.className = 'story-viewer__progress-bar';
+      if (idx < activeIndex) {
+        bar.classList.add('story-viewer__progress-bar--completed');
+      } else if (idx === activeIndex) {
+        bar.classList.add('story-viewer__progress-bar--active');
+      }
+      storyProgress.append(bar);
+    });
+  }
+
+  function renderStory(index) {
+    const story = sampleStories[index];
+    if (!story) return;
+
+    currentStoryIndex = index;
+
+    if (storyAuthorUsername) storyAuthorUsername.textContent = story.username;
+    if (storyAuthorAvatar) {
+      storyAuthorAvatar.src = story.avatar;
+      storyAuthorAvatar.alt = `${story.username}'s avatar`;
+    }
+    if (storyTime) storyTime.textContent = story.time;
+    if (storyImage) {
+      storyImage.src = story.image;
+      storyImage.alt = `Story by ${story.username}`;
+    }
+
+    renderProgressBars(index);
+
+    if (prevStoryBtn) prevStoryBtn.disabled = index === 0;
+    if (nextStoryBtn) nextStoryBtn.disabled = index === sampleStories.length - 1;
+  }
+
+  function openStoryViewer(index, triggerElement) {
+    lastActiveTrigger = triggerElement || null;
+    renderStory(index);
+    storyDialog.showModal();
+    if (closeStoryBtn) closeStoryBtn.focus();
+  }
+
+  function closeStoryViewer() {
+    if (storyDialog.open) {
+      storyDialog.close();
+    }
+    if (lastActiveTrigger && typeof lastActiveTrigger.focus === 'function') {
+      lastActiveTrigger.focus();
+    }
+  }
+
+  function navigateStory(direction) {
+    const targetIndex = currentStoryIndex + direction;
+    if (targetIndex >= 0 && targetIndex < sampleStories.length) {
+      renderStory(targetIndex);
+    }
+  }
+
+  storyButtons.forEach((btn, index) => {
+    btn.addEventListener('click', () => openStoryViewer(index, btn));
+  });
+
+  if (closeStoryBtn) {
+    closeStoryBtn.addEventListener('click', closeStoryViewer);
+  }
+
+  if (prevStoryBtn) {
+    prevStoryBtn.addEventListener('click', () => navigateStory(-1));
+  }
+
+  if (nextStoryBtn) {
+    nextStoryBtn.addEventListener('click', () => navigateStory(1));
+  }
+
+  storyDialog.addEventListener('click', (event) => {
+    if (event.target === storyDialog) {
+      closeStoryViewer();
+    }
+  });
+
+  storyDialog.addEventListener('keydown', (event) => {
+    if (event.key === 'ArrowLeft') {
+      event.preventDefault();
+      navigateStory(-1);
+    } else if (event.key === 'ArrowRight') {
+      event.preventDefault();
+      navigateStory(1);
+    } else if (event.key === 'Escape') {
+      event.preventDefault();
+      closeStoryViewer();
+    }
+  });
+}
+
+initStoryViewer();
