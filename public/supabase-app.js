@@ -24,6 +24,9 @@ const uploadPreviewImage = document.querySelector('#upload-preview-image');
 const uploadPreviewName = document.querySelector('#upload-preview-name');
 const uploadPreviewSize = document.querySelector('#upload-preview-size');
 const authButton = document.querySelector('#auth-button');
+const themeToggle = document.querySelector('#theme-toggle');
+const themeToggleMobile = document.querySelector('#theme-toggle-mobile');
+const themeStorageKey = 'instalite-theme';
 const profileUsername = document.querySelector('#profile-username');
 const profileSubtitle = document.querySelector('#profile-subtitle');
 const maximumImageSize = 5 * 1024 * 1024;
@@ -323,6 +326,61 @@ function showSuccessToast(message) {
   }, 4000);
 }
 
+function readStoredTheme() {
+  try {
+    return localStorage.getItem(themeStorageKey) === 'dark' ? 'dark' : 'light';
+  } catch (error) {
+    return document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
+  }
+}
+
+function syncThemeControls(theme) {
+  const isDark = theme === 'dark';
+  const label = isDark ? 'Switch to light mode' : 'Switch to dark mode';
+
+  for (const toggle of [themeToggle, themeToggleMobile]) {
+    if (!toggle) continue;
+    toggle.setAttribute('aria-pressed', String(isDark));
+    toggle.setAttribute('aria-label', label);
+  }
+
+  if (themeToggle) {
+    themeToggle.querySelector('.theme-toggle__label').textContent = isDark ? 'Light mode' : 'Dark mode';
+  }
+
+  if (themeToggleMobile) {
+    themeToggleMobile.textContent = isDark ? '☀' : '☾';
+  }
+}
+
+function applyTheme(theme) {
+  if (theme === 'dark') {
+    document.documentElement.setAttribute('data-theme', 'dark');
+  } else {
+    document.documentElement.removeAttribute('data-theme');
+  }
+
+  try {
+    localStorage.setItem(themeStorageKey, theme);
+  } catch (error) {
+    /* localStorage unavailable — the theme still applies for this visit. */
+  }
+
+  syncThemeControls(theme);
+}
+
+function initializeTheme() {
+  // The inline head script may already have applied the stored theme;
+  // sync the toggle controls with whatever is currently active.
+  applyTheme(readStoredTheme());
+  themeToggle?.addEventListener('click', () => {
+    applyTheme(document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark');
+  });
+  themeToggleMobile?.addEventListener('click', () => {
+    applyTheme(document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark');
+  });
+}
+
 function updateSignedInProfile(user) {
   currentUser = user;
   const username = user?.user_metadata?.display_name || user?.email?.split('@')[0] || 'your.name';
@@ -363,6 +421,8 @@ if (todayDate) {
     year: 'numeric',
   });
 }
+
+initializeTheme();
 
 if (!configIsReady && !useEmulators) {
   showFeedMessage('Supabase is not configured. Copy .env.example to .env and add your project values.', 'error');

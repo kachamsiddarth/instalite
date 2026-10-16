@@ -30,6 +30,9 @@ test('Express serves the Supabase-enabled page and frontend assets', async () =>
   assert.match(page, /type="module" src="\/supabase-app\.js"/);
   assert.match(page, /id="auth-form"/);
   assert.match(page, /id="create-post-form"/);
+  assert.match(page, /id="theme-toggle"/);
+  assert.match(page, /id="theme-toggle-mobile"/);
+  assert.match(page, /localStorage\.getItem\('instalite-theme'\)/);
   assert.equal(stylesheetResponse.status, 200);
   assert.equal(appScriptResponse.status, 200);
   assert.equal(configResponse.status, 200);
@@ -52,7 +55,14 @@ test('Express serves the Supabase-enabled page and frontend assets', async () =>
   assert.match(appScript, /getAuthErrorMessage\(error, authMode\)/);
   assert.match(appScript, /row-level security enabled/);
   assert.match(appScript, /from\('posts'\)/);
+  assert.match(appScript, /initializeTheme\(\)/);
+  assert.match(appScript, /instalite-theme/);
+  assert.match(appScript, /data-theme/);
   assert.doesNotMatch(appScript, /fetch\(['"]\/api\/posts/);
+
+  const stylesheet = await stylesheetResponse.text();
+  assert.match(stylesheet, /:root\[data-theme="dark"\]/);
+  assert.match(stylesheet, /\.theme-toggle/);
 });
 
 test('The server no longer exposes the removed in-memory posts API', async () => {
