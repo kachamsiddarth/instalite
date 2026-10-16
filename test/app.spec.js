@@ -33,12 +33,15 @@ const { expect, test } = require('@playwright/test');
  */
 async function gotoHome(page) {
   await page.goto('/');
-  // Supabase-app.js is a module script; wait for it to update the feed area.
+  // Supabase-app.js is a module script; wait for it to update the feed area
+  // and finish wiring the theme controls before interacting.
   await page.waitForFunction(() => {
     const el = document.querySelector('#feed-posts');
     // The inline HTML placeholder text is "Finding your little moments…".
     // Supabase-app.js replaces it with an error message when not configured.
-    return el && el.textContent.trim().length > 0;
+    const feedReady = el && el.textContent.trim().length > 0;
+    const themeReady = document.querySelector('#theme-toggle')?.getAttribute('data-theme-ready') === 'true';
+    return feedReady && themeReady;
   }, { timeout: 10_000 });
 }
 
@@ -243,17 +246,47 @@ test.describe('Static asset routing', () => {
 // Feature-specific checks (add blocks here as workshop issues are implemented)
 // ---------------------------------------------------------------------------
 
+test.describe('Dark mode (issue #3)', () => {
+  test('sidebar toggle switches the colour scheme and back', async ({ page }) => {
+    await gotoHome(page);
+    const toggle = page.locator('#theme-toggle');
+    await expect(toggle).toBeVisible();
+    await expect(page.locator('html')).not.toHaveAttribute('data-theme', 'dark');
+    await toggle.click();
+    await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+    await expect(toggle).toHaveAttribute('aria-pressed', 'true');
+    await toggle.click();
+    await expect(page.locator('html')).not.toHaveAttribute('data-theme', 'dark');
+    await expect(toggle).toHaveAttribute('aria-pressed', 'false');
+  });
+
+  test('selected theme persists across reloads', async ({ page }) => {
+    await gotoHome(page);
+    await page.locator('#theme-toggle').click();
+    await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+    await page.reload();
+    await gotoHome(page);
+    await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+    // Restore light mode so later tests start from a known state.
+    await page.locator('#theme-toggle').click();
+    await expect(page.locator('html')).not.toHaveAttribute('data-theme', 'dark');
+  });
+});
+
+test.describe('Dark mode mobile toggle (issue #3)', () => {
+  test.use({ viewport: { width: 390, height: 844 } });
+
+  test('mobile toggle switches the colour scheme', async ({ page }) => {
+    await gotoHome(page);
+    const toggle = page.locator('#theme-toggle-mobile');
+    await expect(toggle).toBeVisible();
+    await toggle.click();
+    await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+  });
+});
+
 // TEMPLATE — uncomment and fill in when a feature is implemented.
 // Each block must be self-contained and must NOT depend on other blocks.
-//
-// test.describe('Dark mode (issue #N)', () => {
-//   test('toggle switches the colour scheme', async ({ page }) => {
-//     await gotoHome(page);
-//     const toggle = page.locator('#dark-mode-toggle'); // use real selector
-//     await toggle.click();
-//     await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
-//   });
-// });
 //
 // test.describe('Like / unlike posts (issue #N)', () => {
 //   test.beforeEach(async ({ page }) => {
