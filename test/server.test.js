@@ -113,14 +113,32 @@ test('Supabase schema supports validated public comments with owner deletes', as
   assert.match(schema, /alter publication supabase_realtime add table public\.post_comments/);
 });
 
+test('Supabase schema derives comment author names server-side', async () => {
+  const schema = await fs.readFile(path.join(__dirname, '..', 'supabase', 'schema.sql'), 'utf8');
+
+  assert.match(schema, /create or replace function public\.set_post_comment_username\(\)/);
+  assert.match(schema, /security definer/);
+  assert.match(schema, /auth\.jwt\(\)/);
+  assert.match(schema, /NEW\.username := derived_name/);
+  assert.match(schema, /create trigger set_post_comment_username/);
+  assert.match(schema, /before insert on public\.post_comments/);
+});
+
 test('Frontend wires comment reading and posting to the post_comments table', async () => {
   const appScript = await fs.readFile(path.join(__dirname, '..', 'public', 'supabase-app.js'), 'utf8');
+  const commentInsert = appScript.slice(
+    appScript.indexOf('async function submitPostComment'),
+    appScript.indexOf('const postSavedState'),
+  );
 
   assert.match(appScript, /from\('post_comments'\)/);
   assert.match(appScript, /submitPostComment\(post\.id/);
   assert.match(appScript, /maximumCommentLength/);
   assert.match(appScript, /post-card__comment-form/);
   assert.match(appScript, /Sign in to comment on posts/);
+  assert.match(appScript, /set_post_comment_username/);
+  assert.match(commentInsert, /username: 'instalite-user'/);
+  assert.doesNotMatch(commentInsert, /user_metadata/);
 });
 
 test('Supabase schema keeps saved posts private to their owner', async () => {

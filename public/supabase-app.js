@@ -275,11 +275,13 @@ async function submitPostComment(postId, body) {
   }
 
   try {
-    const username = (currentUser.user_metadata?.display_name || currentUser.email?.split('@')[0] || 'instalite-user').slice(0, 30);
+    // The displayed author name is derived server-side from the auth JWT
+    // via the set_post_comment_username trigger; the client only sends
+    // the post, the owner id, and the comment text.
     const { error } = await supabase.from('post_comments').insert({
       post_id: postId,
       user_id: currentUser.id,
-      username,
+      username: 'instalite-user',
       body: trimmed,
     });
     if (error) throw error;

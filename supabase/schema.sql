@@ -47,6 +47,9 @@ create policy "Likes cannot be updated" on public.post_likes for update using (f
 
 -- Comments: signed-in users can comment; text is validated for length
 -- both in the app and here so direct API calls cannot bypass it.
+-- The displayed author name is derived server-side from the caller's
+-- auth JWT (display_name metadata, else the email local part), so a
+-- client can never impersonate another user via a chosen username.
 create table if not exists public.post_comments (
   id uuid primary key default gen_random_uuid(),
   post_id uuid not null references public.posts(id) on delete cascade,
@@ -56,6 +59,46 @@ create table if not exists public.post_comments (
   created_at timestamptz not null default now()
 );
 
+create or replace function public.set_post_comment_username()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  jwt_claims jsonb := auth.jwt();
+  derived_name text;
+begin
+  if NEW.user_id is distinct from (select auth.uid()) then
+    raise exception 'post_comments.user_id must match the authenticated user';
+  end if;
+
+  derived_name := nullif(trim(both from coalesce(
+    jwt_claims -> 'user_metadata' ->> 'display_name',
+    jwt_claims ->> 'email',
+    ''
+  )), '');
+
+  if derived_name is not null and position('@' in derived_name) > 0 then
+    derived_name := split_part(derived_name, '@', 1);
+  end if;
+
+  derived_name := left(nullif(trim(both from coalesce(derived_name, '')), ''), 30);
+
+  if derived_name is null then
+    raise exception 'Unable to derive a comment author name from the authenticated user';
+  end if;
+
+  NEW.username := derived_name;
+  return NEW;
+end;
+$$;
+
+drop trigger if exists set_post_comment_username on public.post_comments;
+create trigger set_post_comment_username
+  before insert on public.post_comments
+  for each row execute function public.set_post_comment_username();
+
 create index if not exists post_comments_post_id_idx on public.post_comments (post_id, created_at);
 alter table public.post_comments enable row level security;
 
@@ -63,7 +106,7 @@ drop policy if exists "Comments are publicly readable" on public.post_comments;
 create policy "Comments are publicly readable" on public.post_comments for select using (true);
 drop policy if exists "Signed-in users can comment" on public.post_comments;
 create policy "Signed-in users can comment" on public.post_comments for insert
-  with check ((select auth.uid()) = user_id);
+  with check ((select auth.uid()) = user_id and char_length(body) between 1 and 300);
 drop policy if exists "Users can delete their own comments" on public.post_comments;
 create policy "Users can delete their own comments" on public.post_comments for delete
   using ((select auth.uid()) = user_id);
