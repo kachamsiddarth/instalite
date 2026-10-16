@@ -22,6 +22,29 @@ create policy "Posts cannot be updated" on public.posts for update using (false)
 drop policy if exists "Posts cannot be deleted" on public.posts;
 create policy "Posts cannot be deleted" on public.posts for delete using (false);
 
+-- Likes: one row per (post, user). Counts are derived with count queries
+-- so no denormalized counter can drift out of sync.
+create table if not exists public.post_likes (
+  post_id uuid not null references public.posts(id) on delete cascade,
+  user_id uuid not null references auth.users(id) on delete cascade,
+  created_at timestamptz not null default now(),
+  primary key (post_id, user_id)
+);
+
+create index if not exists post_likes_post_id_idx on public.post_likes (post_id);
+alter table public.post_likes enable row level security;
+
+drop policy if exists "Likes are publicly readable" on public.post_likes;
+create policy "Likes are publicly readable" on public.post_likes for select using (true);
+drop policy if exists "Users can like posts" on public.post_likes;
+create policy "Users can like posts" on public.post_likes for insert
+  with check ((select auth.uid()) = user_id);
+drop policy if exists "Users can unlike their own likes" on public.post_likes;
+create policy "Users can unlike their own likes" on public.post_likes for delete
+  using ((select auth.uid()) = user_id);
+drop policy if exists "Likes cannot be updated" on public.post_likes;
+create policy "Likes cannot be updated" on public.post_likes for update using (false);
+
 insert into storage.buckets (id, name, public)
 values ('post-images', 'post-images', true)
 on conflict (id) do update set public = true;
@@ -41,6 +64,7 @@ create policy "Users can delete their own post images" on storage.objects
     and (storage.foldername(name))[2] = (select auth.uid()::text));
 
 alter table public.posts replica identity full;
+alter table public.post_likes replica identity full;
 
 do $$
 begin
@@ -52,6 +76,15 @@ begin
       and tablename = 'posts'
   ) then
     alter publication supabase_realtime add table public.posts;
+  end if;
+  if not exists (
+    select 1
+    from pg_publication_tables
+    where pubname = 'supabase_realtime'
+      and schemaname = 'public'
+      and tablename = 'post_likes'
+  ) then
+    alter publication supabase_realtime add table public.post_likes;
   end if;
 end
 $$;

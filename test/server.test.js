@@ -81,3 +81,23 @@ test('Supabase schema requires authenticated post creation and owner-scoped phot
   assert.match(schema, /storage\.foldername\(name\).*auth\.uid/);
   assert.match(schema, /from pg_publication_tables[\s\S]*tablename = 'posts'[\s\S]*alter publication supabase_realtime add table public\.posts/i);
 });
+
+test('Supabase schema supports one like per user with owner-scoped unlike', async () => {
+  const schema = await fs.readFile(path.join(__dirname, '..', 'supabase', 'schema.sql'), 'utf8');
+
+  assert.match(schema, /create table if not exists public\.post_likes/);
+  assert.match(schema, /primary key \(post_id, user_id\)/);
+  assert.match(schema, /"Likes are publicly readable" on public\.post_likes for select/);
+  assert.match(schema, /"Users can unlike their own likes" on public\.post_likes for delete/);
+  assert.match(schema, /alter publication supabase_realtime add table public\.post_likes/);
+});
+
+test('Frontend wires like and unlike actions to the post_likes table', async () => {
+  const appScript = await fs.readFile(path.join(__dirname, '..', 'public', 'supabase-app.js'), 'utf8');
+
+  assert.match(appScript, /from\('post_likes'\)/);
+  assert.match(appScript, /togglePostLike\(post\.id\)/);
+  assert.match(appScript, /data-post-id/);
+  assert.match(appScript, /aria-pressed/);
+  assert.match(appScript, /Sign in to like posts/);
+});
