@@ -917,6 +917,85 @@ function initializeSavedView() {
   });
 }
 
+function collectStories() {
+  return [...document.querySelectorAll('.story[data-story-index]')].map((story) => ({
+    name: story.dataset.storyName || story.querySelector('.story__name')?.textContent?.trim() || 'Story',
+    image: story.dataset.storyImage || story.querySelector('img')?.src || '',
+    avatar: story.querySelector('img')?.src || '',
+  }));
+}
+
+let storyIndex = 0;
+
+function renderStoryViewer() {
+  const stories = collectStories();
+  if (!stories.length) return;
+
+  storyIndex = (storyIndex + stories.length) % stories.length;
+  const story = stories[storyIndex];
+  const dialog = document.querySelector('#story-viewer');
+
+  document.querySelector('#story-viewer-image').src = story.image;
+  document.querySelector('#story-viewer-image').alt = `Story by ${story.name}`;
+  document.querySelector('#story-viewer-avatar').src = story.avatar;
+  document.querySelector('#story-viewer-name').textContent = story.name;
+  document.querySelector('#story-viewer-position').textContent = `${storyIndex + 1} / ${stories.length}`;
+
+  const progress = document.querySelector('#story-viewer-progress');
+  progress.replaceChildren(...stories.map((_, index) => {
+    const segment = document.createElement('span');
+    segment.className = 'story-viewer__segment';
+    if (index < storyIndex) segment.dataset.seen = 'true';
+    if (index === storyIndex) segment.dataset.active = 'true';
+    return segment;
+  }));
+
+  document.querySelector('#story-viewer-prev').disabled = storyIndex === 0;
+  document.querySelector('#story-viewer-next').disabled = storyIndex === stories.length - 1;
+  dialog.dataset.storyIndex = String(storyIndex);
+}
+
+function openStoryViewer(index) {
+  storyIndex = index;
+  renderStoryViewer();
+  document.querySelector('#story-viewer').showModal();
+  document.querySelector('#close-story-viewer').focus();
+}
+
+function stepStoryViewer(delta) {
+  const stories = collectStories();
+  const next = storyIndex + delta;
+  if (next < 0 || next >= stories.length) return;
+  storyIndex = next;
+  renderStoryViewer();
+}
+
+function initializeStoryViewer() {
+  document.querySelectorAll('.story[data-story-index]').forEach((story) => {
+    story.addEventListener('click', () => {
+      openStoryViewer(Number(story.dataset.storyIndex) || 0);
+    });
+  });
+
+  document.querySelector('#close-story-viewer')?.addEventListener('click', () => {
+    document.querySelector('#story-viewer').close();
+  });
+  document.querySelector('#story-viewer-prev')?.addEventListener('click', () => stepStoryViewer(-1));
+  document.querySelector('#story-viewer-next')?.addEventListener('click', () => stepStoryViewer(1));
+
+  document.querySelector('#story-viewer')?.addEventListener('keydown', (event) => {
+    if (event.key === 'ArrowRight') {
+      event.preventDefault();
+      stepStoryViewer(1);
+    } else if (event.key === 'ArrowLeft') {
+      event.preventDefault();
+      stepStoryViewer(-1);
+    } else if (event.key === 'Escape') {
+      document.querySelector('#story-viewer').close();
+    }
+  });
+}
+
 function getAuthErrorMessage(error, mode) {
   const message = error?.message || '';
 
@@ -948,6 +1027,7 @@ if (todayDate) {
 
 initializeTheme();
 initializeSavedView();
+initializeStoryViewer();
 
 if (!configIsReady && !useEmulators) {
   showFeedMessage('Supabase is not configured. Copy .env.example to .env and add your project values.', 'error');

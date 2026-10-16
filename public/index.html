@@ -96,30 +96,30 @@
         </header>
 
         <section class="stories" aria-label="Stories">
-          <div class="story">
+          <button class="story" type="button" data-story-index="0" data-story-name="Your story" data-story-image="https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=900&h=1200&q=80" aria-haspopup="dialog">
             <span class="story__ring"><img src="https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=120&h=120&q=80" alt=""></span>
             <span class="story__name">Your story</span>
-          </div>
-          <div class="story">
+          </button>
+          <button class="story" type="button" data-story-index="1" data-story-name="leo.park" data-story-image="https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&w=900&h=1200&q=80" aria-haspopup="dialog">
             <span class="story__ring"><img src="https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&w=120&h=120&q=80" alt=""></span>
             <span class="story__name">leo.park</span>
-          </div>
-          <div class="story">
+          </button>
+          <button class="story" type="button" data-story-index="2" data-story-name="nina.rivers" data-story-image="https://images.unsplash.com/photo-1531123897727-8f129e1688ce?auto=format&fit=crop&w=900&h=1200&q=80" aria-haspopup="dialog">
             <span class="story__ring"><img src="https://images.unsplash.com/photo-1531123897727-8f129e1688ce?auto=format&fit=crop&w=120&h=120&q=80" alt=""></span>
             <span class="story__name">nina.rivers</span>
-          </div>
-          <div class="story">
+          </button>
+          <button class="story" type="button" data-story-index="3" data-story-name="ellie.w" data-story-image="https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=900&h=1200&q=80&sat=-30" aria-haspopup="dialog">
             <span class="story__ring"><img src="https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=120&h=120&q=80&sat=-30" alt=""></span>
             <span class="story__name">ellie.w</span>
-          </div>
-          <div class="story">
+          </button>
+          <button class="story" type="button" data-story-index="4" data-story-name="milo.gray" data-story-image="https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?auto=format&fit=crop&w=900&h=1200&q=80" aria-haspopup="dialog">
             <span class="story__ring"><img src="https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?auto=format&fit=crop&w=120&h=120&q=80" alt=""></span>
             <span class="story__name">milo.gray</span>
-          </div>
-          <div class="story">
+          </button>
+          <button class="story" type="button" data-story-index="5" data-story-name="zoe.sun" data-story-image="https://images.unsplash.com/photo-1517841905240-472988babdf9?auto=format&fit=crop&w=900&h=1200&q=80" aria-haspopup="dialog">
             <span class="story__ring"><img src="https://images.unsplash.com/photo-1517841905240-472988babdf9?auto=format&fit=crop&w=120&h=120&q=80" alt=""></span>
             <span class="story__name">zoe.sun</span>
-          </div>
+          </button>
         </section>
 
         <section class="feed" aria-label="Photo feed" aria-live="polite">
@@ -264,6 +264,18 @@
         <p class="create-form__feedback" id="create-post-feedback" role="status" aria-live="polite"></p>
         <button class="create-form__submit" id="submit-create-post" type="submit">Share post</button>
       </form>
+    </dialog>
+    <dialog class="story-viewer" id="story-viewer" aria-labelledby="story-viewer-name">
+      <div class="story-viewer__progress" id="story-viewer-progress" aria-hidden="true"></div>
+      <header class="story-viewer__header">
+        <img class="avatar" id="story-viewer-avatar" alt="" width="32" height="32">
+        <strong id="story-viewer-name"></strong>
+        <span class="story-viewer__position" id="story-viewer-position"></span>
+        <button class="story-viewer__close" id="close-story-viewer" type="button" aria-label="Close story viewer">×</button>
+      </header>
+      <img class="story-viewer__image" id="story-viewer-image" alt="Story photo">
+      <button class="story-viewer__nav story-viewer__nav--prev" id="story-viewer-prev" type="button" aria-label="Previous story">‹</button>
+      <button class="story-viewer__nav story-viewer__nav--next" id="story-viewer-next" type="button" aria-label="Next story">›</button>
     </dialog>
     <p class="toast" id="post-success-toast" role="status" aria-live="polite" hidden></p>
   </body>

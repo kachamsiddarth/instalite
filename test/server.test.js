@@ -145,3 +145,20 @@ test('Frontend wires save and unsave actions with a private saved view', async (
   assert.match(appScript, /Sign in to save posts/);
   assert.match(page, /id="saved-posts-link"/);
 });
+
+test('Story circles open a viewer with navigation and close controls', async () => {
+  const page = await fs.readFile(path.join(__dirname, '..', 'public', 'index.html'), 'utf8');
+  const appScript = await fs.readFile(path.join(__dirname, '..', 'public', 'supabase-app.js'), 'utf8');
+  const stylesheet = await fs.readFile(path.join(__dirname, '..', 'public', 'style.css'), 'utf8');
+
+  assert.match(page, /id="story-viewer"/);
+  assert.match(page, /data-story-index="0"/);
+  assert.match(page, /id="story-viewer-prev"/);
+  assert.match(page, /id="story-viewer-next"/);
+  assert.match(page, /id="close-story-viewer"/);
+  assert.match(appScript, /openStoryViewer\(/);
+  assert.match(appScript, /stepStoryViewer\(/);
+  assert.match(appScript, /ArrowRight/);
+  assert.match(appScript, /initializeStoryViewer\(\)/);
+  assert.match(stylesheet, /\.story-viewer/);
+});
